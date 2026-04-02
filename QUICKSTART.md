@@ -1,23 +1,25 @@
 # 快速上手 / Quick Start
 
-> 本 fork 地址：[PainKiller0x0/nanobot](https://github.com/PainKiller0x0/nanobot)
-> 基于上游 [HKUDS/nanobot](https://github.com/HKUDS/nanobot) v0.1.4.post6，rebase 到 v0.2.0
+> 本仓库由 PainKiller0x0 fork，基于 [HKUDS/nanobot](https://github.com/HKUDS/nanobot) v0.2.0
 
 ---
 
 ## 一、安装 / Installation
 
 ```bash
-# 克隆本仓库
-git clone https://github.com/PainKiller0x0/nanobot.git
-cd nanobot
+# 自动适配：GitHub / Gitee 一键克隆
+git clone "$(git config --get remote.origin.url 2>/dev/null | sed 's/\.git$//')" nanobot && cd nanobot
 
 # 安装（开发模式，可编辑）
 pip install -e .
-
-# 或者从 PyPI 安装稳定版
-pip install nanobot-ai
 ```
+
+> **如果提示 `remote.origin.url` 为空**，说明你是手动下载 zip，解压后跳过 clone 即可。
+
+> **或者从 PyPI 安装稳定版：**
+> ```bash
+> pip install nanobot-ai
+> ```
 
 > **要求：** Python 3.11+，建议使用虚拟环境：
 > ```bash
@@ -193,8 +195,10 @@ pip install "nanobot-ai[matrix]"   # Matrix 支持
 
 ## 六、同步上游更新 / Sync Upstream
 
+本仓库主要维护在 GitHub，Gitee 为镜像（自动同步）。
+
 ```bash
-# 添加上游仓库
+# 添加上游仓库（只需做一次）
 git remote add upstream https://github.com/HKUDS/nanobot.git
 
 # 拉取上游更新
