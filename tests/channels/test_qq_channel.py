@@ -46,6 +46,7 @@ async def test_on_group_message_routes_to_group_chat_id() -> None:
         group_openid="group123",
         author=SimpleNamespace(member_openid="user1"),
         attachments=[],
+        timestamp="1743890400",
     )
 
     await channel._on_message(data, is_group=True)

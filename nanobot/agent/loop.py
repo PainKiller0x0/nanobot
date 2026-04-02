@@ -670,6 +670,11 @@ class AgentLoop:
 
         await self._maybe_auto_consolidate()
 
+        # Run token-based consolidation synchronously before LLM call to ensure
+        # the prompt fits within the context window. A second pass runs as
+        # background after the response for post-call cleanup.
+        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
