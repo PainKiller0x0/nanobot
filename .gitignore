@@ -43,7 +43,7 @@ weixin/
 
 # Session / memory / chat history
 sessions/
-memory/
+/memory/
 memory.db
 memory.db-shm
 memory.db-wal
