@@ -71,6 +71,7 @@ class SubagentManager:
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -78,7 +79,7 @@ class SubagentManager:
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(task_id, task, display_label, origin, attachments)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -93,8 +94,9 @@ class SubagentManager:
 
         bg_task.add_done_callback(_cleanup)
 
-        logger.info("Spawned subagent [{}]: {}", task_id, display_label)
-        return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
+        attachment_note = f" with {len(attachments)} attachment(s)" if attachments else ""
+        logger.info("Spawned subagent [{}]: {}{}", task_id, display_label, attachment_note)
+        return f"Subagent [{display_label}] started (id: {task_id}){attachment_note}. I'll notify you when it completes."
 
     async def _run_subagent(
         self,
@@ -102,6 +104,7 @@ class SubagentManager:
         task: str,
         label: str,
         origin: dict[str, str],
+        attachments: list[dict[str, Any]] | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -126,9 +129,15 @@ class SubagentManager:
             tools.register(WebFetchTool(proxy=self.web_proxy))
 
             system_prompt = self._build_subagent_prompt()
+
+            # Build user message with attachments
+            user_content = task
+            if attachments:
+                user_content = self._format_attachments(task, attachments)
+
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": task},
+                {"role": "user", "content": user_content},
             ]
 
             result = await self.runner.run(AgentRunSpec(
@@ -223,6 +232,31 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
             lines.append("Failure:")
             lines.append(f"- {result.error}")
         return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
+
+    def _format_attachments(self, task: str, attachments: list[dict[str, Any]]) -> str:
+        """Format attachments into the user message."""
+        lines = [f"{task}\n\n## Attachments\n"]
+
+        for i, att in enumerate(attachments, 1):
+            lines.append(f"### Attachment {i}: {att['name']}")
+            lines.append(f"- Path: {att['path']}")
+            lines.append(f"- Size: {att['size']:,} bytes")
+            lines.append(f"- Type: {att['mime_type']}")
+            lines.append("")
+
+            if att['is_text']:
+                lines.append("```")
+                lines.append(att['content'])
+                lines.append("```")
+            else:
+                lines.append(f"[Binary file: base64-encoded below]")
+                lines.append(f"```{att['mime_type']}")
+                lines.append(att['content'])
+                lines.append("```")
+
+            lines.append("")
+
+        return "\n".join(lines)
 
     def _build_subagent_prompt(self) -> str:
         """Build a focused system prompt for the subagent."""

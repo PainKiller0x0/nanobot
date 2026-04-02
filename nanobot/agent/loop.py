@@ -7,17 +7,23 @@ import json
 import re
 import os
 import time
+import uuid
 from contextlib import AsyncExitStack, nullcontext
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal
 
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.memory.consolidation_meta import check_gate
+from nanobot.agent.memory.consolidation_tool import run_consolidation
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.consolidation import ConsolidationTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
@@ -25,6 +31,7 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.task import TaskTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
@@ -142,6 +149,76 @@ class _LoopHookChain(AgentHook):
         return self._extras.finalize_content(context, content)
 
 
+@dataclass
+class TaskInfo:
+    """Metadata for a tracked background task."""
+    id: str
+    name: str
+    created_at: datetime = field(default_factory=datetime.now)
+    status: Literal["pending", "running", "completed", "cancelled", "failed"] = "pending"
+    result: Any = None
+    error: str | None = None
+
+
+class TaskRegistry:
+    """Registry for tracking background tasks with cancel/status support."""
+
+    def __init__(self):
+        self._tasks: dict[str, tuple[asyncio.Task, TaskInfo]] = {}
+
+    def register(self, coro, name: str = "unnamed") -> str:
+        """Schedule a coroutine as a tracked background task. Returns task_id."""
+        task_id = str(uuid.uuid4())[:8]
+        task = asyncio.create_task(coro)
+        info = TaskInfo(id=task_id, name=name, status="running")
+        self._tasks[task_id] = (task, info)
+
+        def _cleanup(t: asyncio.Task) -> None:
+            if task_id not in self._tasks:
+                return
+            _, info = self._tasks[task_id]
+            if t.cancelled():
+                info.status = "cancelled"
+            elif t.exception() is not None:
+                info.status = "failed"
+                info.error = str(t.exception())
+            else:
+                info.status = "completed"
+                info.result = t.result()
+
+        task.add_done_callback(_cleanup)
+        return task_id
+
+    def cancel(self, task_id: str) -> bool:
+        """Cancel a task by ID. Returns True if cancelled, False if not found."""
+        if task_id not in self._tasks:
+            return False
+        task, info = self._tasks[task_id]
+        if info.status not in ("pending", "running"):
+            return False
+        task.cancel()
+        return True
+
+    def get_status(self, task_id: str) -> TaskInfo | None:
+        """Get task status by ID. Returns None if not found."""
+        if task_id not in self._tasks:
+            return None
+        return self._tasks[task_id][1]
+
+    def list_tasks(self) -> dict[str, TaskInfo]:
+        """List all tracked tasks with their status."""
+        return {tid: info for tid, (_, info) in self._tasks.items()}
+
+    async def drain(self) -> None:
+        """Wait for all tasks to complete (used on shutdown)."""
+        if not self._tasks:
+            return
+        tasks = [t for t, _ in self._tasks.values() if not t.done()]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._tasks.clear()
+
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
@@ -174,8 +251,13 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
+        compaction_config=None,  # CompactionConfig
     ):
-        from nanobot.config.schema import ExecToolConfig, WebSearchConfig
+        from nanobot.config.schema import CompactionConfig, ExecToolConfig, WebSearchConfig
+
+        # Default compaction config
+        if compaction_config is None:
+            compaction_config = CompactionConfig()
 
         self.bus = bus
         self.channels_config = channels_config
@@ -214,7 +296,7 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._background_tasks: list[asyncio.Task] = []
+        self._task_registry = TaskRegistry()
         self._session_locks: dict[str, asyncio.Lock] = {}
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
@@ -230,6 +312,10 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
+            compaction_threshold=compaction_config.threshold,
+            compaction_target=compaction_config.target,
+            preserve_recent=compaction_config.preserve_recent,
+            safety_buffer=compaction_config.safety_buffer,
         )
         self._register_default_tools()
         self.commands = CommandRouter()
@@ -253,6 +339,8 @@ class AgentLoop:
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
+        self.tools.register(TaskTool(loop=self))
+        self.tools.register(ConsolidationTool(workspace=self.workspace))
         if self.cron_service:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
@@ -447,9 +535,7 @@ class AgentLoop:
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
-        if self._background_tasks:
-            await asyncio.gather(*self._background_tasks, return_exceptions=True)
-            self._background_tasks.clear()
+        await self._task_registry.drain()
         if self._mcp_stack:
             try:
                 await self._mcp_stack.aclose()
@@ -457,15 +543,74 @@ class AgentLoop:
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
 
-    def _schedule_background(self, coro) -> None:
-        """Schedule a coroutine as a tracked background task (drained on shutdown)."""
-        task = asyncio.create_task(coro)
-        self._background_tasks.append(task)
-        task.add_done_callback(self._background_tasks.remove)
+    def _schedule_background(self, coro, name: str = "background") -> str:
+        """Schedule a coroutine as a tracked background task. Returns task_id."""
+        return self._task_registry.register(coro, name)
+
+    def cancel_background_task(self, task_id: str) -> bool:
+        """Cancel a background task by ID. Returns True if cancelled."""
+        return self._task_registry.cancel(task_id)
+
+    def get_background_task_status(self, task_id: str) -> TaskInfo | None:
+        """Get status of a background task. Returns None if not found."""
+        return self._task_registry.get_status(task_id)
+
+    async def _maybe_auto_consolidate(self) -> None:
+        """Check auto-consolidation gates. If all pass, spawn background consolidation.
+
+        Gate check is synchronous (file stat + JSON parse — sub-millisecond) so safe
+        to call inline. Actual compression runs in background, never blocking the
+        response. Inspired by ant-build's autoDream.ts gate philosophy.
+        """
+        status = check_gate(self.workspace)
+        if not status.should_consolidate:
+            return
+
+        async def _do_consolidate() -> None:
+            logger.info(
+                "auto_consolidation",
+                event="firing",
+                hours_since=status.hours_since,
+            )
+            result = run_consolidation(self.workspace)
+            logger.info(
+                "auto_consolidation",
+                event="completed",
+                success=result["success"],
+                touched=len(result["touched"]),
+                deduped=result["deduped"],
+                compressed=result["compressed"],
+                db_pruned=result["db_pruned"],
+                error=result["error"],
+            )
+
+        self._schedule_background(_do_consolidate(), name="auto_consolidation")
+        logger.debug("auto_consolidation", event="scheduled", gate_reason=status.reason)
+
+    async def _trigger_session_hooks(self, hook_name: str, session_key: str) -> None:
+        """Trigger a session-level hook on all registered hooks."""
+        from nanobot.agent.hook import CompositeHook
+        hook = self._extra_hooks or []
+        if isinstance(hook, list):
+            composite = CompositeHook(hook) if hook else None
+        else:
+            composite = hook
+        if composite:
+            try:
+                await getattr(composite, hook_name)(session_key)
+            except Exception:
+                logger.exception("Session hook {} error", hook_name)
 
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
+        # Trigger on_session_end for all active sessions
+        for key in list(self.sessions._cache.keys()):
+            try:
+                import asyncio
+                asyncio.create_task(self._trigger_session_hooks("on_session_end", key))
+            except Exception:
+                pass
         logger.info("Agent loop stopping")
 
     async def _process_message(
@@ -484,7 +629,10 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            if not session._hook_session_start_done:
+                session._hook_session_start_done = True
+                await self._trigger_session_hooks("on_session_start", key)
+            await self._maybe_auto_consolidate()
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
@@ -509,13 +657,18 @@ class AgentLoop:
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
 
+        # Call on_session_start hook once per session
+        if not session._hook_session_start_done:
+            session._hook_session_start_done = True
+            await self._trigger_session_hooks("on_session_start", key)
+
         # Slash commands
         raw = msg.content.strip()
         ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
         if result := await self.commands.dispatch(ctx):
             return result
 
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        await self._maybe_auto_consolidate()
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):

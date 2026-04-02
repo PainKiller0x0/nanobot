@@ -1,12 +1,5 @@
-.worktrees/
-.assets
-.docs
-.env
+# Python
 *.pyc
-dist/
-build/
-*.egg-info/
-*.egg
 *.pycs
 *.pyo
 *.pyd
@@ -14,12 +7,64 @@ build/
 *.pyz
 *.pywz
 *.pyzz
+__pycache__/
+*.egg-info/
+*.egg
+dist/
+build/
+poetry.lock
+uv.lock
+
+# Virtual env
 .venv/
 venv/
-__pycache__/
-poetry.lock
-.pytest_cache/
-botpy.log
-nano.*.save
+
+# Docs / assets
+.worktrees/
+.docs/
+.assets/
+
+# Local environment (API keys, secrets)
+.env
+nanobot.yaml
+
+# Channel state (contains auth tokens, do NOT commit)
+*.state.json
+account.json
+weixin/
+*.wechat*
+*.weixin*
+
+# Runtime workspace (per-user, per-deployment)
+.workspace/
+.workspace
+/workspace/
+/workspace
+
+# Session / memory / chat history
+sessions/
+memory/
+memory.db
+memory.db-shm
+memory.db-wal
+self-improving/
+proactivity/
+HEARTBEAT.md
+USER.md
+SOUL.md
+AGENTS.md
+TOOLS.md
+
+# Logs / monitoring
+*.log
+lof_monitor/
+watchdog/
+cron/
+
+# Custom skills (user-specific)
+skills/
+
+# OS
 .DS_Store
-uv.lock
+*.save
+botpy.log

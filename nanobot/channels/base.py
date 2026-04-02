@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -128,6 +129,7 @@ class BaseChannel(ABC):
         media: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
+        timestamp: datetime | None = None,
     ) -> None:
         """
         Handle an incoming message from the chat platform.
@@ -141,6 +143,7 @@ class BaseChannel(ABC):
             media: Optional list of media URLs.
             metadata: Optional channel-specific metadata.
             session_key: Optional session key override (e.g. thread-scoped sessions).
+            timestamp: Optional UTC timestamp of when the message was sent by the user.
         """
         if not self.is_allowed(sender_id):
             logger.warning(
@@ -162,6 +165,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
+            timestamp=timestamp or datetime.now(),
         )
 
         await self.bus.publish_inbound(msg)

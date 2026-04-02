@@ -118,6 +118,14 @@ class AgentRunner:
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
+
+                # Call after_tool_call for each tool
+                for tool_call, result in zip(response.tool_calls, results):
+                    try:
+                        await hook.after_tool_call(tool_call.name, tool_call.arguments, result)
+                    except Exception:
+                        logger.exception("after_tool_call hook error for {}", tool_call.name)
+
                 if fatal_error is not None:
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     stop_reason = "tool_error"

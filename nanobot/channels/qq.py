@@ -25,6 +25,7 @@ import os
 import re
 import time
 from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import unquote, urlparse
@@ -93,6 +94,25 @@ def _is_image_name(name: str) -> bool:
     return Path(name).suffix.lower() in _IMAGE_EXTS
 
 
+def _parse_qq_timestamp(ts: str | None) -> datetime | None:
+    """Parse QQ API timestamp string to UTC datetime.
+
+    QQ returns timestamps as Unix epoch in seconds (or ms), e.g. '1743890400'.
+    """
+    if not ts:
+        return None
+    try:
+        # Try as numeric string (seconds or milliseconds)
+        value = int(ts)
+        # If value looks like milliseconds ( > 1e10 for year 1970+ ),
+        # divide by 1000
+        if value > 10**10:
+            value //= 1000
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    except (ValueError, OSError):
+        return None
+
+
 def _guess_send_file_type(filename: str) -> int:
     """Conservative send type: images -> 1, else -> 4."""
     ext = Path(filename).suffix.lower()
@@ -113,15 +133,13 @@ def _make_bot_class(channel: QQChannel) -> type[botpy.Client]:
 
         async def on_ready(self):
             logger.info("QQ bot ready: {}", self.robot.name)
+            await channel._check_greeting_trigger()
 
         async def on_c2c_message_create(self, message: C2CMessage):
             await channel._on_message(message, is_group=False)
 
         async def on_group_at_message_create(self, message: GroupMessage):
             await channel._on_message(message, is_group=True)
-
-        async def on_direct_message_create(self, message):
-            await channel._on_message(message, is_group=False)
 
     return _Bot
 
@@ -210,11 +228,41 @@ class QQChannel(BaseChannel):
         while self._running:
             try:
                 await self._client.start(appid=self.config.app_id, secret=self.config.secret)
+                # Bot connected successfully - greeting is now triggered in on_ready
             except Exception as e:
                 logger.warning("QQ bot error: {}", e)
             if self._running:
                 logger.info("Reconnecting QQ bot in 5 seconds...")
                 await asyncio.sleep(5)
+
+    async def _check_greeting_trigger(self) -> None:
+        """Check for gateway restart greeting trigger and send a greeting."""
+        from pathlib import Path
+        flag_file = Path("/root/.nanobot/workspace/lof_monitor/.gateway_restart_flag")
+        logger.debug("check_greeting: flag exists={}", flag_file.exists())
+        if not flag_file.exists():
+            return
+        try:
+            flag_file.unlink()
+        except OSError:
+            pass
+        # 判断时间段
+        from datetime import datetime
+        h = datetime.now().hour
+        if 5 <= h < 12:
+            greeting = "早安 ☀️"
+        elif 12 <= h < 18:
+            greeting = "下午好 🌤️"
+        elif 18 <= h < 23:
+            greeting = "晚上好 🌙"
+        else:
+            greeting = "夜深了，早点休息 🌛"
+        from nanobot.bus.events import OutboundMessage
+        logger.info("check_greeting: sending greeting '{}'", greeting)
+        await self.bus.publish_outbound(OutboundMessage(
+            channel="qq", chat_id="965E0CA5AB52FBFC537A2E68A7349B9E",
+            content=f"gateway 已上线 · {greeting}",
+        ))
 
     async def stop(self) -> None:
         """Stop bot and cleanup resources."""
@@ -484,6 +532,8 @@ class QQChannel(BaseChannel):
         if not content and not media_paths:
             return
 
+        msg_timestamp = _parse_qq_timestamp(data.timestamp)
+
         await self._handle_message(
             sender_id=user_id,
             chat_id=chat_id,
@@ -493,6 +543,7 @@ class QQChannel(BaseChannel):
                 "message_id": data.id,
                 "attachments": att_meta,
             },
+            timestamp=msg_timestamp,
         )
 
     async def _handle_attachments(

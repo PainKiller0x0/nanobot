@@ -28,6 +28,16 @@ class ChannelsConfig(Base):
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
 
 
+class CompactionConfig(Base):
+    """Session compaction configuration."""
+
+    enabled: bool = True
+    threshold: float = 0.75  # Trigger when estimated tokens reach this fraction of budget (0-1)
+    target: float = 0.35  # Compress down to this fraction of budget (0-1)
+    preserve_recent: int = 4  # Always keep the last N user-turns uncompacted
+    safety_buffer: int = 1024  # Extra headroom for tokenizer estimation drift
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -37,11 +47,12 @@ class AgentDefaults(Base):
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
     max_tokens: int = 8192
-    context_window_tokens: int = 65_536
+    context_window_tokens: int = 204_800
     temperature: float = 0.1
     max_tool_iterations: int = 40
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    compaction: CompactionConfig = Field(default_factory=CompactionConfig)
 
 
 class AgentsConfig(Base):

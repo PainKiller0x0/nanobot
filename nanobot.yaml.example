@@ -1,0 +1,187 @@
+# ============================================================
+# nanobot.yaml — Configuration Template
+# Copy this file to nanobot.yaml and fill in your values.
+# NEVER commit nanobot.yaml (it's in .gitignore).
+# ============================================================
+
+# --- Agents & Model ---
+
+agents:
+  # System prompt shown to the AI on every conversation
+  system_prompt: |
+    You are nanobot, a helpful AI assistant.
+
+  defaults:
+    # Model name. Format: "provider/model-name"
+    # Examples: "anthropic/claude-sonnet-4-5", "openai/gpt-4o", "deepseek/deepseek-chat"
+    model: anthropic/claude-sonnet-4-5
+
+    # Max tokens per response
+    max_tokens: 8192
+
+    # Context window size (for reference, used in truncation logic)
+    context_window_tokens: 200000
+
+# --- LLM Provider API Keys ---
+
+# Uncomment the providers you're using and add your API keys.
+# Keys are loaded from environment variables if not set here.
+# Environment variable takes precedence over this file.
+
+providers:
+  # Anthropic (required for claude-* models)
+  # anthropic:
+  #   api_key: sk-ant-xxxxx
+
+  # OpenAI (required for gpt-* models)
+  # openai:
+  #   api_key: sk-xxxxx
+
+  # DeepSeek
+  # deepseek:
+  #   api_key: sk-xxxxx
+
+  # OpenRouter (aggregates many providers, single API key)
+  # openrouter:
+  #   api_key: sk-or-xxxxx
+  #   api_base: https://openrouter.ai/api/v1  # optional, defaults to this
+
+  # Groq (fast inference)
+  # groq:
+  #   api_key: gsk_xxxxx
+
+  # Zhipu GLM (智谱AI)
+  # zhipu:
+  #   api_key: xxxxx
+
+  # DashScope (阿里云百炼)
+  # dashscope:
+  #   api_key: xxxxx
+
+  # Moonshot (月之暗面 / Kimi)
+  # moonshot:
+  #   api_key: xxxxx
+
+  # Ollama (local models, no API key needed)
+  # ollama:
+  #   api_base: http://localhost:11434/v1
+  #   api_key: ollama  # any non-empty string
+
+  # Custom OpenAI-compatible endpoint
+  # custom:
+  #   api_base: https://your-custom-endpoint.com/v1
+  #   api_key: xxxxx
+
+# --- Channels ---
+
+channels:
+  # Enable channels by setting their config below.
+  # All channels are disabled by default.
+
+  # QQ (OneBot v11, requires go-cqhttp or similar)
+  # qq:
+  #   enabled: true
+  #   app_id: 123456789
+  #   secret: xxxxxx
+  #   # WebSocket reverse mode (recommended)
+  #   ws_url: ws://127.0.0.1:8080/ws
+  #   # Or: long polling mode
+  #   http_url: http://127.0.0.1:5700
+
+  # WeChat (Personal account, uses wechaty-puppet-wechat)
+  # weixin:
+  #   enabled: true
+  #   # Token and state are auto-saved after first QR code scan
+  #   # No config needed here
+
+  # WeChat Work (official account / 企业微信)
+  # wecom:
+  #   enabled: true
+  #   corp_id: xxxxxx
+  #   corp_secret: xxxxxx
+  #   agent_id: 1000001
+  #   token: xxxxxx        # webhook token
+  #   encoding_aes_key: xxxxxx  # encrypt key (32 chars)
+
+  # Telegram
+  # telegram:
+  #   enabled: true
+  #   bot_token: 123456:ABC-xxxxx
+
+  # Discord
+  # discord:
+  #   enabled: true
+  #   bot_token: xxxxxx
+  #   intents: 513  # Gateway Intents flags
+
+  # Email (IMAP/SMTP)
+  # email:
+  #   enabled: true
+  #   imap_host: imap.example.com
+  #   imap_port: 993
+  #   smtp_host: smtp.example.com
+  #   smtp_port: 587
+  #   email: you@example.com
+  #   password: xxxxxx
+
+  # CLI (interactive terminal, no auth needed)
+  cli:
+    enabled: false
+
+# --- Tools ---
+
+tools:
+  # Web search
+  # web_search:
+  #   enabled: true
+  #   # SerpAPI (recommended)
+  #   api_key: xxxxxx
+  #   # Or: Serper (serper.dev)
+  #   api_base: https://google.serper.dev/search
+  #   api_key: xxxxxx
+
+  # Exec tool (run shell commands, DANGEROUS — enable with caution)
+  # exec:
+  #   enabled: false
+  #   timeout: 30
+  #   path_append:  # list of allowed extra PATH directories
+
+  # Cron / scheduled reminders
+  # cron:
+  #   enabled: true
+
+  # MCP server integrations
+  # mcp:
+  #   servers: []
+  #   # Example:
+  #   # - command: npx
+  #   #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/folder"]
+
+  # Subagent spawning
+  # spawn:
+  #   enabled: true
+  #   max_agents: 3
+  #   timeout: 300
+
+# --- Heartbeat / Keep-alive ---
+
+heartbeat:
+  enabled: false
+  interval: 300  # seconds
+
+# --- Advanced ---
+
+# Memory consolidation (auto-compression of long sessions)
+# Auto-triggers every 24h when memory is large. No user notification.
+# memory:
+#   compaction:
+#     enabled: true
+#     threshold: 0.75      # compress when memory exceeds 75% of context window
+#     target: 0.35          # compress down to 35%
+#     preserve_recent: 4    # always keep last 4 turns uncompressed
+
+# Logging
+# log_level: INFO  # DEBUG, INFO, WARNING, ERROR
+
+# Config hot-reload (experimental)
+# hot_reload: false

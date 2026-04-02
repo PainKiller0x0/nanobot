@@ -372,6 +372,18 @@ class WeixinChannel(BaseChannel):
     async def start(self) -> None:
         self._running = True
         self._next_poll_timeout_s = self.config.poll_timeout
+        # Adapt poll timeout based on platform
+        try:
+            from nanobot.utils.platform import PlatformDetector
+            info = PlatformDetector.detect()
+            logger.info(
+                "WeChat channel platform: {} / {} / low_resource={}",
+                info.arch, info.os, info.is_low_resource,
+            )
+            if info.is_low_resource:
+                self._next_poll_timeout_s = min(self._next_poll_timeout_s, 20)
+        except ImportError:
+            pass
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(self._next_poll_timeout_s + 10, connect=30),
             follow_redirects=True,

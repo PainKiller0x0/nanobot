@@ -3,12 +3,14 @@
 import base64
 import mimetypes
 import platform
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from nanobot.utils.helpers import current_time_str
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory import EnhancedMemoryStore as MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
@@ -25,7 +27,10 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self, skill_names: list[str] | None = None,
+        current_message: str = "",
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
@@ -36,6 +41,12 @@ class ContextBuilder:
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
+
+        # Semantic memory search — find relevant memories for the current message
+        if current_message and hasattr(self.memory, "get_relevant_context"):
+            relevant = self.memory.get_relevant_context(current_message, max_memories=3)
+            if relevant:
+                parts.append(f"# Relevant Memories\n\n{relevant}")
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -101,11 +112,29 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST call the 'message' tool with the 'media' parameter. Do NOT use read_file to "send" a file — reading a file only shows its content to you, it does NOT deliver the file to the user. Example: message(content="Here is the file", media=["/path/to/file.png"])"""
 
     @staticmethod
+    def _format_message_time(ts: datetime, timezone: str | None) -> str:
+        """Format a UTC timestamp in the same style as current_time_str."""
+        from zoneinfo import ZoneInfo
+        try:
+            tz = ZoneInfo(timezone) if timezone else None
+        except (KeyError, Exception):
+            tz = None
+        local_ts = ts.astimezone(tz) if tz else ts.astimezone()
+        offset = local_ts.strftime("%z")
+        offset_fmt = f"{offset[:3]}:{offset[3:]}" if len(offset) == 5 else offset
+        tz_name = timezone or (time.strftime("%Z") or "UTC")
+        return f"{local_ts.strftime('%Y-%m-%d %H:%M (%A)')} ({tz_name}, UTC{offset_fmt})"
+
+    @staticmethod
     def _build_runtime_context(
-        channel: str | None, chat_id: str | None, timezone: str | None = None,
+        channel: str | None, chat_id: str | None,
+        timezone: str | None = None,
+        message_timestamp: datetime | None = None,
     ) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
         lines = [f"Current Time: {current_time_str(timezone)}"]
+        if message_timestamp:
+            lines.append(f"User Message At: {ContextBuilder._format_message_time(message_timestamp, timezone)}")
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
@@ -131,9 +160,10 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         channel: str | None = None,
         chat_id: str | None = None,
         current_role: str = "user",
+        message_timestamp: datetime | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-        runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone)
+        runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone, message_timestamp)
         user_content = self._build_user_content(current_message, media)
 
         # Merge runtime context and user content into a single user message
@@ -144,7 +174,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, current_message)},
             *history,
             {"role": current_role, "content": merged},
         ]

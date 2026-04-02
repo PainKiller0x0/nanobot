@@ -50,6 +50,18 @@ class AgentHook:
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return content
 
+    async def on_session_start(self, session_key: str) -> None:
+        """Called when a new session starts."""
+        pass
+
+    async def on_session_end(self, session_key: str) -> None:
+        """Called when a session ends."""
+        pass
+
+    async def after_tool_call(self, tool_name: str, args: dict, result: Any) -> None:
+        """Called after each tool call completes."""
+        pass
+
 
 class CompositeHook(AgentHook):
     """Fan-out hook that delegates to an ordered list of hooks.
@@ -106,3 +118,24 @@ class CompositeHook(AgentHook):
         for h in self._hooks:
             content = h.finalize_content(context, content)
         return content
+
+    async def on_session_start(self, session_key: str) -> None:
+        for h in self._hooks:
+            try:
+                await h.on_session_start(session_key)
+            except Exception:
+                logger.exception("AgentHook.on_session_start error in {}", type(h).__name__)
+
+    async def on_session_end(self, session_key: str) -> None:
+        for h in self._hooks:
+            try:
+                await h.on_session_end(session_key)
+            except Exception:
+                logger.exception("AgentHook.on_session_end error in {}", type(h).__name__)
+
+    async def after_tool_call(self, tool_name: str, args: dict, result: Any) -> None:
+        for h in self._hooks:
+            try:
+                await h.after_tool_call(tool_name, args, result)
+            except Exception:
+                logger.exception("AgentHook.after_tool_call error in {}", type(h).__name__)
