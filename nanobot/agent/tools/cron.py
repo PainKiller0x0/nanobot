@@ -4,12 +4,14 @@ from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import DangerLevel, Permission, Tool
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJobState, CronSchedule
 
 
 class CronTool(Tool):
+    danger_level = DangerLevel.MEDIUM
+    permission = Permission.ASK
     """Tool to schedule reminders and recurring tasks."""
 
     def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):

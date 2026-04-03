@@ -5,7 +5,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import DangerLevel, Permission, Tool
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
@@ -57,6 +57,8 @@ class _FsTool(Tool):
 # ---------------------------------------------------------------------------
 
 class ReadFileTool(_FsTool):
+    danger_level = DangerLevel.LOW
+    permission = Permission.ALLOW
     """Read file contents with optional line-based pagination."""
 
     _MAX_CHARS = 128_000
@@ -155,6 +157,8 @@ class ReadFileTool(_FsTool):
 # ---------------------------------------------------------------------------
 
 class WriteFileTool(_FsTool):
+    danger_level = DangerLevel.MEDIUM
+    permission = Permission.ASK
     """Write content to a file."""
 
     @property
@@ -223,6 +227,8 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
 
 
 class EditFileTool(_FsTool):
+    danger_level = DangerLevel.MEDIUM
+    permission = Permission.ASK
     """Edit a file by replacing text with fallback matching."""
 
     @property
@@ -323,6 +329,8 @@ class EditFileTool(_FsTool):
 # ---------------------------------------------------------------------------
 
 class ListDirTool(_FsTool):
+    danger_level = DangerLevel.LOW
+    permission = Permission.ALLOW
     """List directory contents with optional recursion."""
 
     _DEFAULT_MAX = 200

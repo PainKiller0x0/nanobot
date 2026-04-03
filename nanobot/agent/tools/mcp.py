@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import DangerLevel, Permission, Tool
 from nanobot.agent.tools.registry import ToolRegistry
 
 
@@ -75,6 +75,8 @@ def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
 
 
 class MCPToolWrapper(Tool):
+    danger_level = DangerLevel.HIGH
+    permission = Permission.ASK
     """Wraps a single MCP server tool as a nanobot Tool."""
 
     def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):

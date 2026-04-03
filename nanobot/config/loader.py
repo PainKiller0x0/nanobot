@@ -1,6 +1,7 @@
 """Configuration loading utilities."""
 
 import json
+import os
 from pathlib import Path
 
 import pydantic
@@ -75,3 +76,65 @@ def _migrate_config(data: dict) -> dict:
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
         tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
     return data
+
+
+# ---------------------------------------------------------------------------
+# Feature Flags — environment variable overrides
+# ---------------------------------------------------------------------------
+# Allow runtime overrides of config values via environment variables.
+# Format: NANOBOT_<section>_<key> (uppercase, underscores).
+# Example: NANOBOT_AGENTS_CONTEXT_WINDOW_TOKENS=100000
+#          NANOBOT_TOOLS_EXEC_TIMEOUT=30
+#          NANOBOT_TOOLS_RESTRICT_TO_WORKSPACE=false
+
+
+def _str_to_bool(v: str) -> bool:
+    return v.lower() in ("true", "1", "yes", "on")
+
+
+_FEATURE_FLAG_MAPPINGS: list[tuple[str, str, type]] = [
+    # (env_var_name, dot_path_in_config, type_converter)
+    ("NANOBOT_AGENTS_DEFAULTS_MODEL", "agents.defaults.model", str),
+    ("NANOBOT_AGENTS_DEFAULTS_CONTEXT_WINDOW_TOKENS", "agents.defaults.context_window_tokens", int),
+    ("NANOBOT_AGENTS_DEFAULTS_MAX_TOKENS", "agents.defaults.max_tokens", int),
+    ("NANOBOT_TOOLS_EXEC_TIMEOUT", "tools.exec.timeout", int),
+    ("NANOBOT_TOOLS_EXEC_ENABLE", "tools.exec.enable", _str_to_bool),
+    ("NANOBOT_TOOLS_RESTRICT_TO_WORKSPACE", "tools.restrict_to_workspace", _str_to_bool),
+    ("NANOBOT_COMPACTION_THRESHOLD", "agents.defaults.compaction.compaction_threshold", float),
+    ("NANOBOT_COMPACTION_TARGET", "agents.defaults.compaction.compaction_target", float),
+    ("NANOBOT_MAX_CONCURRENT_REQUESTS", "max_concurrent_requests", int),
+]
+
+
+def apply_feature_flags(config: Config) -> Config:
+    """
+    Override config values with environment variables (Feature Flags).
+
+    This enables runtime configuration without editing config.json.
+    Env vars take precedence.  Keys not set in env are untouched.
+
+    Usage examples:
+        NANOBOT_AGENTS_DEFAULTS_CONTEXT_WINDOW_TOKENS=100000
+        NANOBOT_TOOLS_EXEC_TIMEOUT=30
+        NANOBOT_COMPACTION_THRESHOLD=0.8
+    """
+    for env_var, dot_path, converter in _FEATURE_FLAG_MAPPINGS:
+        val_str = os.environ.get(env_var)
+        if val_str is None:
+            continue
+        try:
+            val = converter(val_str)
+            _set_by_dot_path(config, dot_path, val)
+            logger.info("Feature flag active: {}={}", env_var, val)
+        except Exception:
+            logger.warning("Ignoring invalid {}={!r}", env_var, val_str)
+    return config
+
+
+def _set_by_dot_path(obj: object, dot_path: str, value: object) -> None:
+    """Set a nested attribute on obj using dot-notation path."""
+    parts = dot_path.split(".")
+    target = obj
+    for part in parts[:-1]:
+        target = getattr(target, part)
+    setattr(target, parts[-1], value)

@@ -5,13 +5,15 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import DangerLevel, Permission, Tool
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
 
 
 class SpawnTool(Tool):
+    danger_level = DangerLevel.HIGH
+    permission = Permission.DENY
     """Tool to spawn a subagent for background task execution."""
 
     # Max attachment size: 10MB

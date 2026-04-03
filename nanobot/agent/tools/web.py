@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import httpx
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import DangerLevel, Permission, Tool
 from nanobot.utils.helpers import build_image_content_blocks
 
 if TYPE_CHECKING:
@@ -73,6 +73,8 @@ def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
 
 
 class WebSearchTool(Tool):
+    danger_level = DangerLevel.LOW
+    permission = Permission.ALLOW
     """Search the web using configured provider."""
 
     name = "web_search"
@@ -216,6 +218,8 @@ class WebSearchTool(Tool):
 
 
 class WebFetchTool(Tool):
+    danger_level = DangerLevel.LOW
+    permission = Permission.ALLOW
     """Fetch and extract content from a URL."""
 
     name = "web_fetch"

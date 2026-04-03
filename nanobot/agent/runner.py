@@ -104,23 +104,27 @@ class AgentRunner:
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
+                await hook.before_execute_tools(context)
+
+                # Build assistant message with context.tool_calls (may have been
+                # filtered by the before_execute_tools hook, e.g. permission checks).
                 messages.append(build_assistant_message(
                     response.content or "",
-                    tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
+                    tool_calls=[tc.to_openai_tool_call() for tc in context.tool_calls],
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 ))
-                tools_used.extend(tc.name for tc in response.tool_calls)
+                tools_used.extend(tc.name for tc in context.tool_calls)
 
-                await hook.before_execute_tools(context)
-
-                results, new_events, fatal_error = await self._execute_tools(spec, response.tool_calls)
+                # Use context.tool_calls (may have been filtered by hook)
+                results, new_events, fatal_error = await self._execute_tools(spec, context.tool_calls)
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
 
-                # Call after_tool_call for each tool
-                for tool_call, result in zip(response.tool_calls, results):
+                # Call after_tool_call for each tool (zipped over context.tool_calls
+                # so denied/skipped tools are excluded from results)
+                for tool_call, result in zip(context.tool_calls, results):
                     try:
                         await hook.after_tool_call(tool_call.name, tool_call.arguments, result)
                     except Exception:
@@ -133,12 +137,19 @@ class AgentRunner:
                     context.stop_reason = stop_reason
                     await hook.after_iteration(context)
                     break
-                for tool_call, result in zip(response.tool_calls, results):
+                for tool_call, result in zip(context.tool_calls, results):
+                    # Layer 2 + 3 compaction before storing in history
+                    from nanobot.agent.memory.tiered_compaction import (
+                        layer2_truncate,
+                        micro_compact,
+                    )
+                    compact = layer2_truncate(str(result) if result is not None else "")
+                    compact = micro_compact(compact, tool_call.name)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "name": tool_call.name,
-                        "content": result,
+                        "content": compact,
                     })
                 await hook.after_iteration(context)
                 continue

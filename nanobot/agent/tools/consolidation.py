@@ -8,10 +8,12 @@ from nanobot.agent.memory.consolidation_meta import (
     is_locked,
     read_meta,
 )
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import DangerLevel, Permission, Tool
 
 
 class ConsolidationTool(Tool):
+    danger_level = DangerLevel.MEDIUM
+    permission = Permission.ASK
     """Query the auto-consolidation system status."""
 
     def __init__(self, workspace: Any) -> None:

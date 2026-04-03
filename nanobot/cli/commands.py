@@ -486,7 +486,7 @@ def _make_provider(config: Config):
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
-    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.config.loader import apply_feature_flags, load_config, set_config_path
 
     config_path = None
     if config:
@@ -501,7 +501,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     _warn_deprecated_config_keys(config_path)
     if workspace:
         loaded.agents.defaults.workspace = workspace
-    return loaded
+    return apply_feature_flags(loaded)
 
 
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
@@ -653,6 +653,12 @@ def gateway(
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
 
+    # Permission system with denial-tracking (inspired by Claude Code)
+    perm_path = config.workspace_path / "security" / "permissions.json"
+    perm_max_denials = config.tools.exec.max_permission_denials if config.tools.exec else 3
+    from nanobot.security.permission_system import PermissionSystem
+    permission_system = PermissionSystem(perm_path, max_denials=perm_max_denials)
+
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
         _migrate_cron_store(config)
@@ -678,6 +684,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        permission_system=permission_system,
         compaction_config=config.agents.defaults.compaction,
     )
 

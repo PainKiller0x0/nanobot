@@ -3,7 +3,7 @@
 import re
 from typing import Any, Awaitable, Callable
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import DangerLevel, Permission, Tool
 from nanobot.bus.events import OutboundMessage
 
 
@@ -41,6 +41,8 @@ def _clean_content(content: str) -> str:
 
 
 class MessageTool(Tool):
+    danger_level = DangerLevel.LOW
+    permission = Permission.ALLOW
     """Tool to send messages to users on chat channels."""
 
     def __init__(

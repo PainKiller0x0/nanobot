@@ -147,6 +147,7 @@ class ExecToolConfig(Base):
     enable: bool = True
     timeout: int = 60
     path_append: str = ""
+    max_permission_denials: int = 3  # Auto-deny after this many consecutive denials
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""

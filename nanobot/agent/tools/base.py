@@ -1,7 +1,25 @@
 """Base class for agent tools."""
 
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Any
+
+
+class DangerLevel(Enum):
+    """How dangerous a tool is if misused."""
+
+    LOW = "low"       # Read-only, no side effects
+    MEDIUM = "medium" # Modifies files or state
+    HIGH = "high"     # Destructive or irreversible
+    CRITICAL = "critical"  # System-level or potentially catastrophic
+
+
+class Permission(Enum):
+    """Default permission for a tool."""
+
+    ALLOW = "allow"   # Auto-allowed without prompting
+    ASK = "ask"       # Ask user before executing (default)
+    DENY = "deny"    # Never auto-execute
 
 
 class Tool(ABC):
@@ -10,7 +28,14 @@ class Tool(ABC):
 
     Tools are capabilities that the agent can use to interact with
     the environment, such as reading files, executing commands, etc.
+
+    Subclasses should override ``danger_level`` and ``permission`` to
+    declare their safety profile.  These are used by the permission
+    system to gate dangerous operations.
     """
+
+    danger_level: DangerLevel = DangerLevel.MEDIUM
+    permission: Permission = Permission.ASK
 
     _TYPE_MAP = {
         "string": str,

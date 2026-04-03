@@ -2,10 +2,12 @@
 
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import DangerLevel, Permission, Tool
 
 
 class TaskTool(Tool):
+    danger_level = DangerLevel.MEDIUM
+    permission = Permission.ASK
     """Tool to manage background tasks (list status, cancel)."""
 
     def __init__(self, loop):

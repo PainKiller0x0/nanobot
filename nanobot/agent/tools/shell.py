@@ -9,11 +9,14 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import DangerLevel, Permission, Tool
 
 
 class ExecTool(Tool):
     """Tool to execute shell commands."""
+
+    danger_level = DangerLevel.HIGH
+    permission = Permission.DENY
 
     def __init__(
         self,

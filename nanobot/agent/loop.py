@@ -90,6 +90,29 @@ class _LoopHook(AgentHook):
         self._stream_buf = ""
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
+        # Permission check: filter out DENIED tools before execution
+        if self._loop._permission_system is not None:
+            from nanobot.security.permission_system import Decision
+
+            allowed = []
+            for tc in context.tool_calls:
+                decision = self._loop._permission_system.check(tc.name, tc.arguments)
+                if decision == Decision.ALLOWED:
+                    allowed.append(tc)
+                elif decision == Decision.ASK:
+                    allowed.append(tc)
+                    logger.info("PermissionSystem: ASK → executing {} (user may want to record)", tc.name)
+                else:  # DENIED
+                    denied_result = f"[Permission Denied] Tool '{tc.name}' was blocked. Use a safer approach or ask the user to allow it."
+                    context.tool_results.append(denied_result)
+                    context.tool_events.append({
+                        "name": tc.name,
+                        "status": "permission_denied",
+                        "detail": "blocked by PermissionSystem",
+                    })
+                    logger.info("PermissionSystem: DENIED tool {}", tc.name)
+            context.tool_calls = allowed
+
         if self._on_progress:
             if not self._on_stream:
                 thought = self._loop._strip_think(
@@ -251,6 +274,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
+        permission_system=None,  # PermissionSystem | None
         compaction_config=None,  # CompactionConfig
     ):
         from nanobot.config.schema import CompactionConfig, ExecToolConfig, WebSearchConfig
@@ -278,6 +302,7 @@ class AgentLoop:
         self.context = ContextBuilder(workspace, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+        self._permission_system = permission_system
         self.runner = AgentRunner(provider)
         self.subagents = SubagentManager(
             provider=provider,
