@@ -375,10 +375,40 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def _resolve_api_key(config_key: str | None, env_var: str, spec_name: str | None = None) -> str | None:
+    """
+    Resolve API key: env var takes precedence over config.
+
+    Credential Vault design: keys should be injected via environment variables
+    so they never appear in the LLM's context (config could be read by the agent
+    through tools).  Config value is only a fallback for local/dev setups.
+
+    Standard env var names are respected:
+      OPENAI_API_KEY, ANTHROPIC_API_KEY, AZURE_OPENAI_API_KEY,
+      or the generic NANOBOT_API_KEY for the default provider.
+    """
+    import os
+    from nanobot.providers.registry import find_by_name
+
+    # 1. Provider-specific env var (e.g. OPENAI_API_KEY)
+    env_key = os.environ.get(env_var) if env_var else None
+    if env_key:
+        return env_key
+
+    # 2. Generic fallback (e.g. NANOBOT_API_KEY)
+    generic_key = os.environ.get("NANOBOT_API_KEY")
+    if generic_key:
+        return generic_key
+
+    # 3. Config file (least preferred — visible to the agent via read_file)
+    return config_key
+
+
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config.
 
     Routing is driven by ``ProviderSpec.backend`` in the registry.
+    API keys are resolved via Credential Vault: env vars > config.
     """
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.registry import find_by_name
@@ -389,19 +419,32 @@ def _make_provider(config: Config):
     spec = find_by_name(provider_name) if provider_name else None
     backend = spec.backend if spec else "openai_compat"
 
+    # Env var names by backend
+    _ENV_MAP = {
+        "openai_compat": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "azure_openai": "AZURE_OPENAI_API_KEY",
+        "openai_codex": "OPENAI_API_KEY",
+    }
+    env_var = _ENV_MAP.get(backend, "NANOBOT_API_KEY")
+
+    def resolve_key(cfg_key: str | None) -> str | None:
+        return _resolve_api_key(cfg_key, env_var, backend)
+
     # --- validation ---
     if backend == "azure_openai":
-        if not p or not p.api_key or not p.api_base:
+        if not p or not (p.api_key or os.environ.get(env_var)) or not p.api_base:
             console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
-            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
-            console.print("Use the model field to specify the deployment name.")
+            console.print("Set api_key via AZURE_OPENAI_API_KEY env var or config.")
+            console.print("Set api_base in ~/.nanobot/config.json under providers.azure_openai section")
             raise typer.Exit(1)
     elif backend == "openai_compat" and not model.startswith("bedrock/"):
-        needs_key = not (p and p.api_key)
+        needs_key = not (p and p.api_key) and not os.environ.get(env_var) and not os.environ.get("NANOBOT_API_KEY")
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
         if needs_key and not exempt:
             console.print("[red]Error: No API key configured.[/red]")
-            console.print("Set one in ~/.nanobot/config.json under providers section")
+            console.print("Set one via environment variable (e.g. OPENAI_API_KEY) or")
+            console.print("in ~/.nanobot/config.json under providers section.")
             raise typer.Exit(1)
 
     # --- instantiation by backend ---
@@ -411,14 +454,14 @@ def _make_provider(config: Config):
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
         provider = AzureOpenAIProvider(
-            api_key=p.api_key,
+            api_key=resolve_key(p.api_key),
             api_base=p.api_base,
             default_model=model,
         )
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
         provider = AnthropicProvider(
-            api_key=p.api_key if p else None,
+            api_key=resolve_key(p.api_key if p else None),
             api_base=config.get_api_base(model),
             default_model=model,
             extra_headers=p.extra_headers if p else None,
@@ -426,7 +469,7 @@ def _make_provider(config: Config):
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
         provider = OpenAICompatProvider(
-            api_key=p.api_key if p else None,
+            api_key=resolve_key(p.api_key if p else None),
             api_base=config.get_api_base(model),
             default_model=model,
             extra_headers=p.extra_headers if p else None,
@@ -771,6 +814,38 @@ def gateway(
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
     async def run():
+        loop = asyncio.get_running_loop()
+        shutdown_complete = asyncio.Event()
+
+        async def _graceful_shutdown():
+            """Shared shutdown sequence for SIGINT / SIGTERM."""
+            console.print("\n[yellow]Graceful shutdown in progress...[/yellow]")
+            # 1. Stop accepting new work
+            agent.stop()
+            heartbeat.stop()
+            cron.stop()
+            # 2. Save all in-memory sessions (durable state before exit)
+            try:
+                for key, session in session_manager._cache.items():
+                    session_manager.save(session)
+                console.print("[green]✓[/green] All sessions saved ({})", len(session_manager._cache))
+            except Exception:
+                console.print("[red]✗[/red] Session save failed")
+            # 3. Close channels gracefully
+            await channels.stop_all()
+            # 4. Close MCP connections
+            await agent.close_mcp()
+            shutdown_complete.set()
+
+        def _sigterm_handler():
+            console.print("\n[yellow]Received SIGTERM[/yellow]")
+            asyncio.create_task(_graceful_shutdown())
+
+        try:
+            loop.add_signal_handler(signal.SIGTERM, _sigterm_handler)
+        except NotImplementedError:
+            pass  # Windows doesn't support add_signal_handler
+
         try:
             await cron.start()
             await heartbeat.start()
@@ -780,16 +855,12 @@ def gateway(
             )
         except KeyboardInterrupt:
             console.print("\nShutting down...")
+            await _graceful_shutdown()
         except Exception:
             import traceback
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
-        finally:
-            await agent.close_mcp()
-            heartbeat.stop()
-            cron.stop()
-            agent.stop()
-            await channels.stop_all()
+            await _graceful_shutdown()
 
     asyncio.run(run())
 
