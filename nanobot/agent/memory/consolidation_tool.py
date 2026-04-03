@@ -18,11 +18,27 @@ import hashlib
 import json
 import re
 import sqlite3
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write content atomically: temp file + rename, safe against crash mid-write."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        tmp.rename(path)
+    except OSError:
+        # Clean up temp file on failure
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 from nanobot.agent.memory.consolidation_meta import (
     acquire_lock,
@@ -163,7 +179,7 @@ def _write_memories(
     touched = []
     for path, content in files:
         try:
-            path.write_text(content, encoding="utf-8")
+            _atomic_write(path, content)
             touched.append(path)
         except OSError as e:
             logger.warning("consolidation_tool", event="write_failed", path=str(path), error=str(e))
@@ -270,7 +286,6 @@ def run_consolidation(workspace: Path) -> dict[str, Any]:
 
         # --- Mark done ---
         mark_consolidated(workspace)
-        release_lock(workspace)  # 释放锁，允许下次触发
         result["success"] = True
 
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -291,3 +306,8 @@ def run_consolidation(workspace: Path) -> dict[str, Any]:
         # Rollback lock mtime so time-gate re-fires next turn
         rollback_lock_mtime(workspace, prior_mtime)
         return result
+
+    finally:
+        # Always release the lock so next consolidation can proceed.
+        # On crash, lock_timeout in consolidation_meta.py handles stale locks.
+        release_lock(workspace)

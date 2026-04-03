@@ -30,6 +30,10 @@ SCAN_FILE = ".auto_consolidation_scan.json"
 # session-gate is still closed (avoids constant stat() on every message)
 SCAN_THROTTLE_SECONDS = 10 * 60  # 10 minutes
 
+# Lock timeout: treat stale locks (crashed processes) as expired after this.
+# Must be longer than a normal consolidation run; 5 min covers most cases.
+LOCK_TIMEOUT_SECONDS = 5 * 60  # 5 minutes
+
 DEFAULT_THRESHOLD_HOURS = 1.0
 
 
@@ -90,13 +94,23 @@ def acquire_lock(workspace: Path) -> float | None:
     """
     Try to acquire the consolidation lock.
 
-    Returns the prior mtime of the lock file if acquired, None if already locked.
+    Returns the prior mtime of the lock file if acquired, None if already locked
+    (or if the existing lock is stale and was cleaned up here, also returns None).
+
     The prior mtime is used for rollback on failure.
     """
     lock_path = _get_lock_path(workspace)
     try:
         prior_mtime = lock_path.stat().st_mtime
     except FileNotFoundError:
+        prior_mtime = 0.0
+
+    # If a stale lock exists, clean it first
+    if prior_mtime > 0 and time.time() - prior_mtime > LOCK_TIMEOUT_SECONDS:
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
         prior_mtime = 0.0
 
     try:
@@ -128,8 +142,19 @@ def rollback_lock_mtime(workspace: Path, prior_mtime: float) -> None:
 
 
 def is_locked(workspace: Path) -> bool:
-    """Check if another consolidation is in progress."""
-    return _get_lock_path(workspace).exists()
+    """Check if another consolidation is in progress (stale locks are ignored)."""
+    lock_path = _get_lock_path(workspace)
+    if not lock_path.exists():
+        return False
+    # Treat locks older than LOCK_TIMEOUT_SECONDS as stale (crashed process)
+    mtime = lock_path.stat().st_mtime
+    if time.time() - mtime > LOCK_TIMEOUT_SECONDS:
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+        return False
+    return True
 
 
 # -------------------------------------------------------------------
@@ -217,7 +242,7 @@ def check_gate(workspace: Path) -> GateStatus:
     # to prevent re-scanning on every message)
     write_last_scan(workspace)
 
-    # --- Lock gate ---
+    # --- Lock gate (stale locks auto-cleaned by is_locked) ---
     if is_locked(workspace):
         return GateStatus(
             should_consolidate=False,
