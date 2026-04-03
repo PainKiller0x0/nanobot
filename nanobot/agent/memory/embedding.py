@@ -1,7 +1,10 @@
 """Lightweight embedding generation with local caching and compression."""
-import pickle
+from __future__ import annotations
+
 import hashlib
 import os
+import pickle
+import threading
 from pathlib import Path
 from typing import Union, List
 
@@ -13,6 +16,11 @@ try:
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except ImportError:
     pass
+
+
+# Module-level lock: prevents concurrent SentenceTransformer init from
+# closing huggingface_hub's global httpx.Client mid-retry.
+_INIT_LOCK = threading.Lock()
 
 
 class EmbeddingGenerator:
@@ -38,17 +46,22 @@ class EmbeddingGenerator:
         self.cache_dir = cache_dir or Path.home() / ".nanobot" / "embedding_cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Use Chinese mirror for faster downloads
-        os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-
+        # These are set lazily inside _ensure_model() so that concurrent
+        # cron jobs don't race to overwrite HF_ENDPOINT while another
+        # job is still mid-retry.
         self._model = None
         self._embedding_dim = None
 
-    @property
-    def model(self):
-        """Lazy load model from local cache only."""
-        if self._model is None:
-            # Let SentenceTransformer auto-discover cached model from huggingface hub
+    def _ensure_model(self):
+        """Thread-safe lazy init of the SentenceTransformer model."""
+        if self._model is not None:
+            return
+        with _INIT_LOCK:
+            # Double-check after acquiring lock
+            if self._model is not None:
+                return
+            # Set HF_ENDPOINT only inside the lock, just before loading
+            os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
             cache_folder = (
                 Path.home() / ".cache" / "torch" / "sentence_transformers"
             )
@@ -57,6 +70,10 @@ class EmbeddingGenerator:
                 cache_folder=str(cache_folder),
             )
             self._embedding_dim = self._model.get_sentence_embedding_dimension()
+
+    @property
+    def model(self):
+        self._ensure_model()
         return self._model
 
     def encode(
@@ -85,9 +102,10 @@ class EmbeddingGenerator:
                     texts_to_encode.append(t)
                     indices_to_encode.append(i)
 
-        # Encode missing texts
+        # Encode missing texts — triggers lazy model init inside lock
         if texts_to_encode:
-            embeddings = self.model.encode(texts_to_encode, convert_to_numpy=True)
+            self._ensure_model()
+            embeddings = self._model.encode(texts_to_encode, convert_to_numpy=True)
             if compress:
                 embeddings = embeddings.astype(np.float16)
             for idx, text_t, emb in zip(indices_to_encode, texts_to_encode, embeddings):
