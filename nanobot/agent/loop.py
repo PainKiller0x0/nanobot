@@ -591,6 +591,12 @@ class AgentLoop:
         to call inline. Actual compression runs in background, never blocking the
         response. Inspired by ant-build's autoDream.ts gate philosophy.
         """
+        # Startup cooldown: skip consolidation for the first 5 minutes after gateway
+        # starts. Gateway needs memory for model loading and first-message processing.
+        # Prevents slow startup experience when consolidation fires immediately on boot.
+        if (time.time() - self._start_time) < 300:
+            return
+
         status = check_gate(self.workspace)
         if not status.should_consolidate:
             return

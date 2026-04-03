@@ -235,6 +235,18 @@ def run_consolidation(workspace: Path) -> dict[str, Any]:
         "error": str | None,
       }
     """
+    # Skip embedding model during consolidation to prevent OOM
+    # on memory-constrained VMs (e.g. 2GB). Embedding model (~400MB)
+    # competing with consolidation can cause gateway crash.
+    import nanobot.agent.memory.vector_manager as _vm
+    _vm._CONSOLIDATION_IN_PROGRESS = True
+    try:
+        return _run_consolidation_impl(workspace)
+    finally:
+        _vm._CONSOLIDATION_IN_PROGRESS = False
+
+
+def _run_consolidation_impl(workspace: Path) -> dict[str, Any]:
     # Try to acquire lock
     gate = check_gate(workspace)
     if not gate.should_consolidate:

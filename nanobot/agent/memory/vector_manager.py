@@ -14,6 +14,10 @@ try:
 except ImportError:
     EmbeddingGenerator = None
 
+# Global flag: set to True during consolidation to skip embedding model loading.
+# Prevents OOM when consolidation competes for memory with the embedding model.
+_CONSOLIDATION_IN_PROGRESS = False
+
 
 class VectorMemoryManager:
     """
@@ -175,8 +179,13 @@ class VectorMemoryManager:
         top_k: int = None,
         threshold: float = None,
         category: str = None,
+        _skip_embed: bool = False,
     ) -> List[Dict]:
         """Semantic search using cosine similarity."""
+        # Skip embedding model during consolidation to avoid OOM
+        if _skip_embed or _CONSOLIDATION_IN_PROGRESS:
+            return []
+
         top_k = top_k or self.retrieval_params["top_k"]
         threshold = threshold or self.retrieval_params["similarity_threshold"]
 
