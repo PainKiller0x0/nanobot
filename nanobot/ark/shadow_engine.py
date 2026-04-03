@@ -16,13 +16,20 @@ L1: ShadowEngine — 影子引擎
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import signal
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+NANOBOT_ROOT = Path.home() / ".nanobot"
+PENDING_SWITCH_FILE = NANOBOT_ROOT / "pending_switch"
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +141,7 @@ class ShadowEngine:
         port: int,
         is_shadow: bool
     ) -> asyncio.subprocess.Process:
-        """启动 gateway 子进程"""
+        """启动 gateway 子进程，等待端口就绪"""
         args = [sys.executable, "-m", "nanobot", "gateway"]
 
         if is_shadow:
@@ -155,7 +162,31 @@ class ShadowEngine:
             f"Spawned {'shadow' if is_shadow else 'main'} gateway "
             f"(pid={proc.pid}, port={port})"
         )
-        return proc
+
+        # 等待端口就绪，最多 30 秒，超时则杀死进程并抛异常
+        try:
+            for attempt in range(30):
+                await asyncio.sleep(1)
+                try:
+                    reader, writer = await asyncio.wait_for(
+                        asyncio.open_connection("localhost", port),
+                        timeout=2,
+                    )
+                    writer.close()
+                    await writer.wait_closed()
+                    logger.info(f"Gateway on port {port} is ready")
+                    return proc
+                except (ConnectionRefusedError, OSError):
+                    pass  # 还没起来，继续等
+
+            # 30 秒还没就绪，进程肯定有问题
+            proc.kill()
+            raise RuntimeError(
+                f"Gateway on port {port} failed to start within 30s"
+            )
+        except asyncio.CancelledError:
+            proc.kill()
+            raise
 
     # ── 健康检查 ────────────────────────────────────────────────────────
 
@@ -171,7 +202,7 @@ class ShadowEngine:
             await asyncio.sleep(self._check_interval)
 
     async def _check_main_health(self):
-        """检查 main gateway 健康状态"""
+        """检查 main gateway 健康状态（进程 + TCP 连接）"""
         if not self._main_gateway or not self._main_gateway.process:
             return
 
@@ -186,6 +217,20 @@ class ShadowEngine:
         except asyncio.TimeoutError:
             pass  # 进程还在运行
 
+        # 检查 main gateway 是否真正响应（TCP 连接检查）
+        # 进程可能卡死或 segfault 但进程 PID 还在
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection("localhost", self._main_port),
+                timeout=3,
+            )
+            writer.close()
+            await writer.wait_closed()
+        except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+            logger.warning(f"Main gateway not reachable on port {self._main_port}")
+            await self._failover_to_shadow()
+            return
+
         # 检查 session 文件新鲜度
         if not _is_session_fresh(SESSION_MAX_AGE):
             logger.warning("Main gateway session not fresh")
@@ -196,15 +241,25 @@ class ShadowEngine:
     async def _failover_to_shadow(self):
         """
         故障切换到 shadow gateway
-        1. 发送 ACTIVATE 到 shadow
-        2. shadow 读取 session 接管
-        3. 后台重建 main
+        1. 写 pending_switch 文件，通知 watchdog 进入 ARK 模式（不重启 gateway）
+        2. 发送 ACTIVATE 到 shadow
+        3. shadow 读取 session 接管
+        4. 后台重建 main
         """
         if self._shadow_activated:
             logger.debug("Shadow already activated, skipping failover")
             return
 
         logger.warning("Failing over to shadow gateway")
+
+        # 通知 watchdog 进入 ARK 模式，不要重启 gateway
+        PENDING_SWITCH_FILE.write_text(json.dumps({
+            "event": "failover",
+            "from": "main",
+            "to": "shadow",
+            "at": datetime.now().isoformat(),
+        }))
+        logger.info("Wrote pending_switch (ARK mode)")
 
         success = await self._send_activate()
         if success:

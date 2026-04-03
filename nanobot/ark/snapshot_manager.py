@@ -209,6 +209,7 @@ class SnapshotManager:
     # ── 恢复 ───────────────────────────────────────────────────────────
 
     async def restore_snapshot(self, snapshot_id: str) -> bool:
+        """从快照恢复文件。恢复后需重启 gateway 生效。"""
         """从快照恢复"""
         snap = self._find_snapshot(snapshot_id)
         if not snap:
@@ -250,6 +251,10 @@ class SnapshotManager:
                     shutil.copy2(item, dst)
 
             logger.info(f"Snapshot restored: {snapshot_id}")
+            # 清理 gateway.pid，恢复后 gateway 进程 PID 肯定变了
+            old_pid = NANOBOT_ROOT / "gateway.pid"
+            if old_pid.exists():
+                old_pid.unlink()
             return True
 
         except Exception as e:

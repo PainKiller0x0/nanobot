@@ -145,44 +145,24 @@ class ShadowGateway:
         from pathlib import Path as _Path
 
         from nanobot import __logo__, __version__
-        from nanobot.agent.loop import AgentLoop
-        from nanobot.bus.queue import MessageBus
-        from nanobot.channels.manager import ChannelManager
-        from nanobot.cli.commands import (
-            _load_runtime_config,
-            _make_provider,
-        )
-        from nanobot.cron.service import CronService
-        from nanobot.heartbeat.service import HeartbeatService
-        from nanobot.session.manager import SessionManager
+        from rich.console import Console
 
-        console = __import__("rich.console").Console()
+        from .gateway_shared import build_gateway, _load_runtime_config
+
+        console = Console()
         loop = _asyncio.get_running_loop()
-        shutdown_complete = _asyncio.Event()
+        shutdown_event = _asyncio.Event()
 
-        # SIGTERM handler
         def _sigterm_handler():
-            console.print("\n[yellow]Shadow gateway: SIGTERM received[/yellow]")
-            _asyncio.create_task(_graceful_shutdown())
+            console.print("[yellow]Shadow gateway: SIGTERM received[/yellow]")
+            _asyncio.create_task(_gs())
 
         try:
             loop.add_signal_handler(signal.SIGTERM, _sigterm_handler)
         except NotImplementedError:
             pass  # Windows
 
-        async def _graceful_shutdown():
-            agent.stop()
-            heartbeat.stop()
-            cron.stop()
-            try:
-                for key, session in session_manager._cache.items():
-                    session_manager.save(session)
-            except Exception:
-                pass
-            await channels.stop_all()
-            await agent.close_mcp()
-            shutdown_complete.set()
-
+        components = None  # Will be set if build_gateway succeeds
         try:
             # 加载配置
             config = _load_runtime_config(None, None)
@@ -192,43 +172,38 @@ class ShadowGateway:
                 f"v{__version__}"
             )
 
-            bus = MessageBus()
-            provider = _make_provider(config)
-            session_manager = SessionManager(config.workspace_path)
-
-            agent = AgentLoop(
+            # 构建所有组件（共用 gateway_shared）
+            components = await build_gateway(
                 config=config,
-                provider=provider,
-                session_manager=session_manager,
-                bus=bus,
-                timezone=config.agents.defaults.timezone,
+                console=console,
+                shutdown_event=shutdown_event,
             )
-            channels = ChannelManager(config, bus)
-            cron = CronService(bus, config)
-            heartbeat = HeartbeatService(bus, config)
 
             # 写 PID 文件（激活时写，ShadowEngine 可以检查）
             pid_file = _Path.home() / ".nanobot" / "gateway.pid"
+            pid_file.parent.mkdir(parents=True, exist_ok=True)
             pid_file.write_text(str(os.getpid()))
 
-            await cron.start()
-            await heartbeat.start()
+            await components["cron"].start()
+            await components["heartbeat"].start()
 
             await _asyncio.gather(
-                agent.run(),
-                channels.start_all(),
+                components["agent"].run(),
+                components["channels"].start_all(),
             )
 
         except KeyboardInterrupt:
             console.print("\nShadow gateway interrupted...")
-            await _graceful_shutdown()
+            if components is not None:
+                await components["graceful_shutdown"]()
         except Exception:
             import traceback
             console.print("\n[red]Shadow gateway crashed[/red]")
             console.print(traceback.format_exc())
-            await _graceful_shutdown()
+            if components is not None:
+                await components["graceful_shutdown"]()
 
-        await shutdown_complete.wait()
+        await shutdown_event.wait()
 
 
 # ── CLI 入口 ──────────────────────────────────────────────────────────

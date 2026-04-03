@@ -23,3 +23,6 @@ __all__ = [
     "Snapshot",
     "ArkOrchestrator",
 ]
+
+# Convenience re-exports
+from .gateway_shared import build_gateway  # noqa: F401

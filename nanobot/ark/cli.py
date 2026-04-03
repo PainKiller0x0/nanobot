@@ -57,6 +57,7 @@ def start(
     """启动 ARK 三层容灾系统"""
     import asyncio
     import logging
+    import socket
 
     if verbose:
         logging.basicConfig(
@@ -68,6 +69,44 @@ def start(
             level=logging.INFO,
             format="%(asctime)s | %(levelname)s | %(message)s"
         )
+
+    # ── 启动前检查 ──────────────────────────────────────────────────
+
+    def _port_available(port: int) -> bool:
+        try:
+            with socket.create_server(("localhost", port), reuse_addr=True):
+                return True
+        except OSError:
+            return False
+
+    # 1. 检查 slot 是否已初始化
+    sm = SlotManager()
+    if not sm._current.path.exists():
+        print("[red]错误: Slot 未初始化，请先运行 'nanobot ark init'[/red]")
+        raise SystemExit(1)
+
+    # 2. 检查 gateway 是否已在运行（避免冲突）
+    pid_file = Path.home() / ".nanobot" / "gateway.pid"
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+            import os as _os
+            _os.kill(pid, 0)  # 不抛异常说明进程活着
+            print(f"[red]错误: gateway 已在运行 (PID {pid})，请先停止后再启动[/red]")
+            print(f"  systemctl stop nanobot-gateway  # 如果用 systemd 管理")
+            raise SystemExit(1)
+        except (FileNotFoundError, ValueError, ProcessLookupError):
+            pid_file.unlink()  # 清理失效 PID 文件
+
+    # 3. 检查端口是否可用
+    if not _port_available(main_port):
+        print(f"[red]错误: 端口 {main_port} 已被占用，请先释放后再启动[/red]")
+        raise SystemExit(1)
+    if not _port_available(shadow_port):
+        print(f"[red]错误: 端口 {shadow_port} 已被占用，请先释放后再启动[/red]")
+        raise SystemExit(1)
+
+    print(f"[green]Pre-flight checks passed, starting ARK...[/green]")
 
     async def _run():
         orchestrator = ArkOrchestrator(main_port=main_port, shadow_port=shadow_port)
@@ -177,7 +216,8 @@ def restore(snapshot_id: str):
         sm = SnapshotManager()
         ok = await sm.restore_snapshot(snapshot_id)
         if ok:
-            print(f"[green]Restored from snapshot: {snapshot_id}[/green]")
+            print(f"[green]✓[/green] Restored from snapshot: {snapshot_id}")
+            print(f"[yellow]⚠ 需要重启 gateway 生效: systemctl restart nanobot-gateway[/yellow]")
         else:
             print(f"[red]Snapshot not found or restore failed: {snapshot_id}[/red]")
 
