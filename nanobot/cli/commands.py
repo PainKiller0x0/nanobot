@@ -637,7 +637,6 @@ def gateway(
     # Shadow mode: run as standby shadow gateway
     if shadow_mode:
         from nanobot.ark.shadow_gateway import ShadowGateway
-        import asyncio
         import logging
 
         if verbose:
@@ -668,6 +667,12 @@ def gateway(
     pid_file = Path.home() / ".nanobot" / "gateway.pid"
     pid_file.parent.mkdir(parents=True, exist_ok=True)
     pid_file.write_text(str(os.getpid()))
+
+    # 清理 pending_switch：正常 gateway 启动不是 ARK failover
+    # 避免 watchdog 误认为在 ARK 模式
+    pending_switch = Path.home() / ".nanobot" / "pending_switch"
+    if pending_switch.exists():
+        pending_switch.unlink()
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
