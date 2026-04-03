@@ -715,16 +715,21 @@ def gateway(
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
-        """Execute a cron job through the agent."""
+        """
+        Execute a cron job through the agent.
+
+        只把脚本输出发给 agent，agent 执行完结果用于通知。
+        不发送 "Scheduled Task Timer finished" 这样的系统前缀给 agent，
+        避免 agent 把它当用户消息处理后回复到 QQ。
+        """
         from nanobot.agent.tools.cron import CronTool
         from nanobot.agent.tools.message import MessageTool
         from nanobot.utils.evaluator import evaluate_response
 
-        reminder_note = (
-            "[Scheduled Task] Timer finished.\n\n"
-            f"Task '{job.name}' has been triggered.\n"
-            f"Scheduled instruction: {job.payload.message}"
-        )
+        # 构建 agent 指令：只含 job.message（脚本命令），不含系统前缀
+        agent_instruction = job.payload.message
+        if not agent_instruction:
+            return None
 
         cron_tool = agent.tools.get("cron")
         cron_token = None
@@ -732,7 +737,7 @@ def gateway(
             cron_token = cron_tool.set_cron_context(True)
         try:
             resp = await agent.process_direct(
-                reminder_note,
+                agent_instruction,
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
@@ -747,9 +752,10 @@ def gateway(
         if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
             return response
 
+        # 只有在 deliver=true 且有内容时才决定是否通知
         if job.payload.deliver and job.payload.to and response:
             should_notify = await evaluate_response(
-                response, job.payload.message, provider, agent.model,
+                response, agent_instruction, provider, agent.model,
             )
             if should_notify:
                 from nanobot.bus.events import OutboundMessage
