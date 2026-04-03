@@ -138,7 +138,18 @@ class ExecTool(Tool):
 
             result = "\n".join(output_parts) if output_parts else "(no output)"
 
-            # Head + tail truncation to preserve both start and end of output
+            # RTK filter: compress command output before returning to agent
+            # Replaces the previous head+tail truncation with intelligent
+            # command-specific filtering (git, pytest, ruff, etc.)
+            try:
+                from nanobot.filters import filter_output
+                workspace = getattr(self, "workspace", None)
+                result = filter_output(command, result, process.returncode, 0, workspace)
+            except Exception:
+                # Never let filters break the main path
+                pass
+
+            # Safety net: cap at MAX_OUTPUT even after filtering
             max_len = self._MAX_OUTPUT
             if len(result) > max_len:
                 half = max_len // 2
