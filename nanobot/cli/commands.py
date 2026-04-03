@@ -388,7 +388,6 @@ def _resolve_api_key(config_key: str | None, env_var: str, spec_name: str | None
       or the generic NANOBOT_API_KEY for the default provider.
     """
     import os
-    from nanobot.providers.registry import find_by_name
 
     # 1. Provider-specific env var (e.g. OPENAI_API_KEY)
     env_key = os.environ.get(env_var) if env_var else None
