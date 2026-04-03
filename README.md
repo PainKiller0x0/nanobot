@@ -1,13 +1,20 @@
 <!-- ==================== fork custom content ==================== -->
 
-# ⚡ Jack's nanobot Fork — v0.2.0
+# ⚡ nanobot-exp
 
-> Fork of [HKUDS/nanobot](https://github.com/HKUDS/nanobot) with local customizations.
-> Based on upstream v0.1.4.post6, rebased to v0.2.0.
+> Fork of [HKUDS/nanobot](https://github.com/HKUDS/nanobot) with experimental extensions.
+> **exp** = **Expand**（拓展） + **Experimental**（实验性测试） + **Experience**（经验值升级）
 
-## 本 Fork 的改动
+## 与上游的差异
 
 本分支在 upstream v0.1.4.post6 基础上增加了以下功能：
+
+### 🔧 CC-1.8 — Claude Code 核心架构借鉴
+- **Feature Flags**: `NANOBOT_*` 环境变量覆盖任意 config 值
+- **标准化 Tool 接口**: 所有工具统一 `danger_level` + `permission` 字段
+- **PermissionSystem**: 三级权限（ALLOW/ASK/DENY）+ denial-tracking，`~/.nanobot/security/permissions.json` 持久化
+- **3层上下文压缩**: Layer1 会话归档 / Layer2 结果截断16K / Layer3 微压缩提取关键信息
+- **Credential Vault**: API key 优先从环境变量读取，不暴露在 config 文件中
 
 ### 🛠️ OC-1.0 — Agent 核心升级
 - **TaskRegistry & TaskTool**: 后台任务管理（list/cancel/drain/register/get_status）
@@ -21,7 +28,6 @@
 - **LazyLoader**: 按需延迟导入
 - **PathPolicy**: workspace 路径隔离 + 安全路径拦截
 - **PairingManager**: 6位一次性配对码 + 过期机制
-- **EnvOverride**: `NANOBOT_*` 环境变量配置覆盖 + 类型转换
 
 ### ⚙️ PC-1.6 — 平台与配置
 - **PlatformDetector**: CPU架构/OS/低资源检测 + 优化建议
@@ -55,8 +61,8 @@
 
 ```bash
 # 1. Clone
-git clone https://github.com/PainKiller0x0/nanobot.git
-cd nanobot
+git clone https://github.com/PainKiller0x0/nanobot-exp.git
+cd nanobot-exp
 
 # 2. Install
 pip install -e .
