@@ -58,7 +58,6 @@ TOOLS.md
 # Logs / monitoring
 *.log
 lof_monitor/
-watchdog/
 cron/
 
 # Custom skills (user-specific)
