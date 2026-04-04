@@ -87,12 +87,31 @@ class ShadowGateway:
             await writer.drain()
             return
 
-        logger.info("ACTIVATE received, spawning real gateway")
+        logger.info("ACTIVATE received, checking stable version")
         self._activated = True
+
+        # Fallback: checkout stable ref BEFORE spawning gateway
+        stable_ref_path = Path.home() / ".nanobot/ark/stable_ref"
+        if stable_ref_path.exists():
+            ref = stable_ref_path.read_text().strip()
+            logger.info(f"Fallback to stable ref: {ref[:8]}")
+            # Checkout stable version in nanobot source tree
+            checkout_proc = await asyncio.create_subprocess_exec(
+                "git", "checkout", ref,
+                cwd="/root/nanobot",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await checkout_proc.communicate()
+            if checkout_proc.returncode == 0:
+                logger.info(f"Checked out stable ref: {ref[:8]}")
+            else:
+                logger.warning(f"git checkout failed (running current code)")
 
         # Spawn nanobot gateway as a child process
         proc = await asyncio.create_subprocess_exec(
             sys.executable, "-m", "nanobot", "gateway",
+            cwd="/root/nanobot",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

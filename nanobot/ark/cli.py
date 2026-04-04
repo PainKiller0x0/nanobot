@@ -224,5 +224,89 @@ def restore(snapshot_id: str):
     asyncio.run(_run())
 
 
+@app.command()
+def update_stable(tag: str | None = typer.Option(None, help="Tag name for this stable version (e.g. ark-v1.0)")):
+    """将当前代码标记为稳定版（需人工确认后才能执行）
+
+    执行后：
+    1. 将当前 HEAD commit 写入 ~/.nanobot/ark/stable_ref
+    2. 可选：创建 git tag 记录版本历史
+    """
+    _log_setup()
+    import subprocess
+    from pathlib import Path
+
+    nanobot_root = Path(__file__).parent.parent.parent
+    stable_ref_path = Path.home() / ".nanobot/ark/stable_ref"
+
+    # 获取当前 commit
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=nanobot_root,
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"[red]git rev-parse failed: {result.stderr}[/red]")
+        return
+    commit = result.stdout.strip()
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=nanobot_root, capture_output=True, text=True,
+    ).stdout.strip()
+
+    # 创建 tag（可选）
+    if tag:
+        subprocess.run(["git", "tag", "-a", tag, "-m", f"Stable release: {tag}"],
+                      cwd=nanobot_root, capture_output=True)
+        print(f"[green]✓[/green] Tag [cyan]{tag}[/cyan] created")
+
+    # 写入 stable_ref
+    stable_ref_path.parent.mkdir(parents=True, exist_ok=True)
+    stable_ref_path.write_text(commit)
+    print(f"[green]✓[/green] Stable ref updated: [cyan]{commit[:8]}[/cyan] (branch: {branch})")
+    print(f"  → {stable_ref_path}")
+    print(f"[yellow]⚠ 请手动 git push origin {branch} && git push gitee {branch}[/yellow]")
+    if tag:
+        print(f"[yellow]⚠ 别忘了 git push {tag}[/yellow]")
+
+
+@app.command()
+def stable_status():
+    """查看当前稳定版信息"""
+    _log_setup()
+    import subprocess
+    from pathlib import Path
+
+    nanobot_root = Path(__file__).parent.parent.parent
+    stable_ref_path = Path.home() / ".nanobot/ark/stable_ref"
+
+    if not stable_ref_path.exists():
+        print("[yellow]No stable ref set. Run: nanobot ark update-stable[/yellow]")
+        return
+
+    ref = stable_ref_path.read_text().strip()
+    print(f"Stable ref: [cyan]{ref[:8]}[/cyan]")
+
+    # 获取该 commit 的信息
+    result = subprocess.run(
+        ["git", "log", "-1", "--format=%h %s | %ad", "--date=short", ref],
+        cwd=nanobot_root, capture_output=True, text=True,
+    )
+    if result.returncode == 0 and result.stdout:
+        print(f"Commit:    {result.stdout.strip()}")
+
+    # 与当前 HEAD 比较
+    current = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=nanobot_root, capture_output=True, text=True,
+    ).stdout.strip()
+
+    if ref == current:
+        print("[green]✓[/green] Shadow running stable version (up to date)")
+    else:
+        print(f"[yellow]⚠ Shadow will fallback to old version: {ref[:8]}")
+        print(f"  Current HEAD: {current[:8]} (may be newer / buggy)")
+
+
 if __name__ == "__main__":
     app()
