@@ -898,6 +898,19 @@ def gateway(
         loop = asyncio.get_running_loop()
         shutdown_complete = asyncio.Event()
 
+        # ARK fallback: notify user if we just recovered via stable fallback
+        fallback_marker = Path.home() / ".nanobot/ark/fallback_marker"
+        if fallback_marker.exists():
+            ref = fallback_marker.read_text().strip()[:8]
+            fallback_marker.unlink()
+            from nanobot.bus.events import OutboundMessage
+            channel, chat_id = _pick_heartbeat_target()
+            await bus.publish_outbound(OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=f"⚠️ ARK: Main gateway crashed — 已自动回滚到稳定版本 {ref}，可正常使用了",
+            ))
+
         async def _graceful_shutdown():
             """Shared shutdown sequence for SIGINT / SIGTERM."""
             console.print("\n[yellow]Graceful shutdown in progress...[/yellow]")

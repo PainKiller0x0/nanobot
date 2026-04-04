@@ -92,6 +92,7 @@ class ShadowGateway:
 
         # Fallback: checkout stable ref BEFORE spawning gateway
         stable_ref_path = Path.home() / ".nanobot/ark/stable_ref"
+        fallback_marker = Path.home() / ".nanobot/ark/fallback_marker"
         if stable_ref_path.exists():
             ref = stable_ref_path.read_text().strip()
             logger.info(f"Fallback to stable ref: {ref[:8]}")
@@ -102,11 +103,15 @@ class ShadowGateway:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await checkout_proc.communicate()
+            stdout, stderr = await checkout_proc.communicate()
             if checkout_proc.returncode == 0:
                 logger.info(f"Checked out stable ref: {ref[:8]}")
+                # Write marker so gateway can notify user
+                fallback_marker.write_text(ref)
+                logger.info(f"Fallback marker written: {fallback_marker}")
             else:
                 logger.warning(f"git checkout failed (running current code)")
+                fallback_marker.unlink(missing_ok=True)
 
         # Spawn nanobot gateway as a child process
         proc = await asyncio.create_subprocess_exec(
