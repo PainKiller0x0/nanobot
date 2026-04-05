@@ -202,6 +202,93 @@ git rebase upstream/main   # 或 git merge upstream/main
 
 ---
 
+## 七、ARK 三层容灾（可选）/ ARK Hot-Failover (Optional)
+
+ARK 在 gateway 崩溃时自动切换到热备节点，全程无需人工干预。
+
+### 启动 ARK
+
+```bash
+nanobot ark start
+```
+
+ARK 会启动两个 gateway：
+- **main**（port 8080）：对外服务
+- **shadow**（port 8081）：热备待机，收到 ACTIVATE 后接管
+
+### systemd 管理
+
+```bash
+# 安装 service（service 文件在仓库根目录）
+sudo cp nanobot-gateway.service /etc/systemd/system/
+
+systemctl start nanobot-gateway    # 启动
+systemctl enable nanobot-gateway   # 开机自启
+systemctl status nanobot-gateway   # 查看状态
+journalctl -u nanobot-gateway -f   # 实时日志
+```
+
+### 更新稳定版本
+
+```bash
+# 1. 在 ark-dev 开发
+git checkout ark-dev
+
+# 2. 确认 OK 后合并到 ark-stable
+git checkout ark-stable
+git merge ark-dev
+git push origin ark-stable
+
+# 3. 更新 stable_ref（fallback 时会 checkout 此版本）
+git rev-parse ark-stable > ~/.nanobot/ark/stable_ref
+```
+
+---
+
+## 八、Watchdog 监控守护（可选）/ Watchdog Monitor (Optional)
+
+Watchdog 独立监控 gateway / ARK / QQ 状态，异常时自动触发对应 action。
+
+### 安装并启用
+
+```bash
+# watchdog 已集成在 nanobot 仓库，配置后即可使用
+
+# 1. 确认 watchdog.yaml（默认 ~/.nanobot/watchdog.yaml）
+cat ~/.nanobot/watchdog.yaml
+
+# 2. 安装并启用 systemd 服务（service 文件在仓库根目录）
+sudo cp nanobot-watchdog.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable nanobot-watchdog
+systemctl start nanobot-watchdog
+
+# 3. 验证运行
+systemctl status nanobot-watchdog
+```
+
+> **注意**：`nanobot ark start` 必须在 watchdog 之前或同时运行。Watchdog 负责检测异常，不负责启动 ARK。
+
+### 查看监控状态
+
+```bash
+# 实时日志
+journalctl -u nanobot-watchdog -f
+
+# 手动触发一次检查
+cd /root/nanobot && python3 -m watchdog --once
+```
+
+### 监控链路
+
+| 异常 | 检测 | 自动处理 |
+|------|------|----------|
+| main gateway 挂了 | PID 不存在 | shadow 接管 + QQ 通知 |
+| ARK 全崩 | 无 `nanobot ark` 进程 | 重启 `nanobot ark start` |
+| QQ 断连 | 日志关键词 | 日志告警 |
+
+---
+
 ## 常见问题 / Troubleshooting
 
 | 问题 | 解决 |

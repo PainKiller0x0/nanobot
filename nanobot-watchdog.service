@@ -1,0 +1,17 @@
+[Unit]
+Description=NanoBot Watchdog — unified health monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/nanobot
+ExecStart=/root/nanobot/venv/bin/python3 -m watchdog --foreground
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nanobot-watchdog
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=nanobot Gateway (ARK Mode)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/.nanobot/workspace/lof_monitor
+ExecStart=/root/nanobot/venv/bin/python3 /usr/local/bin/nanobot ark start
+ExecStartPost=/bin/sh -c 'echo "$(date +%%Y-%%m-%%d_%%H:%%M:%%S)" > /root/.nanobot/workspace/lof_monitor/.gateway_restart_flag'
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/root/.nanobot/workspace/lof_monitor/nanobot_gateway.log
+StandardError=append:/root/.nanobot/workspace/lof_monitor/nanobot_gateway.log
+Environment=PYTHONUNBUFFERED=1
+Environment=HF_ENDPOINT=https://hf-mirror.com
+
+[Install]
+WantedBy=multi-user.target

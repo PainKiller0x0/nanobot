@@ -336,6 +336,196 @@ nanobot agent
 
 That's it! You have a working AI assistant in 2 minutes.
 
+---
+
+## 🛡️ ARK — 三层容灾热切换
+
+ARK（Auto-Rollback + Keepalive）是 nanobot 的可选容灾层，在 gateway 崩溃时自动切换到热备节点，无需人工干预。
+
+### 工作原理
+
+```
+┌─────────────────────────────────────────────┐
+│               nanobot-gateway (main)         │  ← 对外服务
+│  shadow_engine: 进程管理 + 健康检查          │
+│  main gateway: nanobot agent loop           │
+└──────────────┬──────────────────────────────┘
+               │ main 挂了 → failover
+               ▼
+┌─────────────────────────────────────────────┐
+│               shadow gateway (shadow)         │  ← 热备待机
+│  standby: 不连 QQ，不跑 agent                 │
+│  收到 ACTIVATE → git checkout stable_ref    │
+│            → 写 fallback_marker               │
+│            → 启动 gateway                     │
+└──────────────┬──────────────────────────────┘
+               │ 读 marker → 通知用户
+               ▼
+         QQ → ⚠️ ARK: 已自动回滚到稳定版本
+```
+
+### 核心文件
+
+| 路径 | 作用 |
+|------|------|
+| `ark/shadow_engine.py` | 双引擎管理（启动/切换/恢复） |
+| `ark/shadow.py` | shadow gateway 独立入口（不依赖 nanobot 包） |
+| `ark/manager.py` | 槽位管理、快照、ARK CLI |
+| `ark/cli.py` | `nanobot ark` 命令 |
+| `~/.nanobot/ark/stable_ref` | 当前稳定版本 commit SHA |
+
+### 稳定版更新流程
+
+```bash
+# 1. ark-dev 开发测试
+git checkout ark-dev
+# ... 开发 ...
+git push
+
+# 2. 确认 OK 后，合并到 ark-stable
+git checkout ark-stable
+git merge ark-dev
+git push origin ark-stable
+
+# 3. 更新 stable_ref（shadow failover 时会 checkout 这个版本）
+git rev-parse HEAD > ~/.nanobin/ark/stable_ref
+# 或用 alias: nanobot ark update-stable --tag v0.X
+```
+
+### 架构特点
+
+- **独立模块**：`ark/` 独立于 `nanobot/`，shadow 入口不导入 nanobot 包
+- **无 overlayfs**：在无特权的 VM 上工作，不依赖 LXC overlay
+- **stable_ref**：fallback 时 checkout 到明确指定的稳定版本，而非"上一个 commit"
+- **fallback 通知**：shadow 接管后通过 QQ 发送通知
+
+### 启动与停止
+
+```bash
+# 启动 ARK（ShadowEngine 管理双 gateway）
+nanobot ark start
+
+# 查看状态
+nanobot ark status
+
+# 停止
+nanobot ark stop
+
+# 查看日志
+journalctl -u nanobot-gateway -f
+tail -f ~/.nanobot/workspace/lof_monitor/nanobot_gateway.log
+```
+
+### systemd 集成
+
+```bash
+# nanobot-gateway.service（ARK 进程管理器）
+systemctl start nanobot-gateway    # 启动
+systemctl enable nanobot-gateway    # 开机自启
+systemctl restart nanobot-gateway   # 重启
+
+# Restart=on-failure：仅在进程异常退出时重启
+# 主动 failover 由 watchdog 触发
+```
+
+---
+
+## 👁️ Watchdog — 统一监控守护
+
+Watchdog 是 nanobot 的可选监控守护进程，独立于 ARK，负责检测 gateway 异常并触发对应 action。
+
+### 监控项
+
+| 监控项 | 检测方式 | 触发 action |
+|--------|----------|-------------|
+| `gateway.main_dead` | PID 文件 + 进程存活 | `ark.activate_shadow` |
+| `ark.both_dead` | `nanobot ark` 进程存在 | `ark.restart_ark` |
+| `qq.disconnected` | 日志关键词（4009 / Session timed out） | `ark.notify` |
+
+### Action
+
+| Action | 作用 |
+|--------|------|
+| `ark.activate_shadow` | 发 ACTIVATE 到 shadow:8081，触发 failover |
+| `ark.restart_ark` | pkill ARK 进程，重启 `nanobot ark start` |
+| `ark.notify` | 日志告警（可扩展为发邮件/QQ/飞书） |
+
+### 配置
+
+```yaml
+# ~/.nanobot/watchdog.yaml
+workspace: ~/.nanobot
+poll_interval: 1.0          # 轮询间隔（秒）
+log_level: INFO
+
+rules:
+  gateway: ark.activate_shadow  # gateway 挂了 → shadow 接管
+  ark: ark.restart_ark          # ARK 全崩 → 重启
+  qq: ark.notify               # QQ 断连 → 告警
+
+monitors:
+  gateway:
+    main_pid_file: ~/.nanobot/gateway_main.pid
+    grace_period: 60.0         # 启动 60 秒内不报警
+  ark:
+    check_interval: 30.0
+    restart_command:
+      - /root/nanobot/venv/bin/python3
+      - -m
+      - nanobot
+      - ark
+      - start
+  qq:
+    log_file: ~/.nanobot/workspace/lof_monitor/nanobot_gateway.log
+    reconnect_keywords:
+      - "4009"
+      - "Session timed out"
+```
+
+### systemd 集成
+
+```bash
+# nanobot-watchdog.service（watchdog 守护进程）
+systemctl start nanobot-watchdog   # 启动
+systemctl enable nanobot-watchdog   # 开机自启
+systemctl restart nanobot-watchdog  # 重启（加载新代码）
+
+# 查看日志
+journalctl -u nanobot-watchdog -f
+cat ~/.nanobot/watchdog.log
+```
+
+### 日志
+
+```
+# systemd journal（推荐）
+journalctl -u nanobot-watchdog -f
+journalctl -u nanobot-watchdog --since "1 hour ago"
+
+# 文件日志（自动轮转）
+cat ~/.nanobot/watchdog.log
+```
+
+### 整体架构
+
+```
+┌──────────────────────────────────────────────────┐
+│  nanobot-gateway.service                          │
+│  └─ ShadowEngine                                 │
+│      ├─ main gateway (port 8080)                 │
+│      └─ shadow gateway (port 8081, standby)      │
+└──────────────────┬───────────────────────────────┘
+                   │
+┌──────────────────▼───────────────────────────────┐
+│  nanobot-watchdog.service (独立进程)             │
+│  ├─ gateway 监控 (PID) → activate_shadow        │
+│  ├─ ark 监控 (进程)   → restart_ark             │
+│  └─ QQ 监控 (日志)    → notify                  │
+└──────────────────────────────────────────────────┘
+```
+
+---
+
 ## 💬 Chat Apps
 
 Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./docs/CHANNEL_PLUGIN_GUIDE.md).
