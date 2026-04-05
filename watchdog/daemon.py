@@ -30,9 +30,11 @@ class WatchdogDaemon:
         self.poll_interval = config.get("poll_interval", 1.0)
         self._running = True
 
-        # Built-in monitor registry: name -> class
-        self._monitor_registry: dict[str, type] = {
-            "gateway.main_dead": _load_gateway_monitor(config),
+        # Built-in monitor registry: monitor instance keyed by all status names it can return
+        _gw = _load_gateway_monitor(config)
+        self._monitor_registry: dict[str, Monitor] = {
+            "gateway.main_dead": _gw,
+            "gateway.shadow_dead": _gw,   # same monitor, different status name
             "ark.both_dead": _load_ark_monitor(config),
             "qq.disconnected": _load_qq_monitor(config),
         }
@@ -40,6 +42,7 @@ class WatchdogDaemon:
         # Action registry: name -> instance
         self._action_registry: dict[str, Action] = {
             "ark.activate_shadow": _load_activate_shadow(config),
+            "ark.start_shadow": _load_start_shadow(config),
             "ark.restart_ark": _load_restart_ark(config),
             "ark.notify": _load_notify(config),
         }
@@ -177,3 +180,10 @@ def _load_restart_ark(config: dict) -> "Action":
 def _load_notify(config: dict) -> "Action":
     from .actions.notify import NotifyAction
     return NotifyAction()
+
+
+def _load_start_shadow(config: dict) -> "Action":
+    from .actions.start_shadow import StartShadowAction
+    return StartShadowAction(
+        workspace=config.get("workspace", "~/.nanobot"),
+    )

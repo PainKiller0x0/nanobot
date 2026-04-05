@@ -34,10 +34,16 @@ class GatewayMonitor(Monitor):
             return None
 
     def _process_alive(self, pid: int) -> bool:
+        """Check if process is alive AND not a zombie."""
         try:
-            os.kill(pid, 0)
-            return True
-        except ProcessLookupError:
+            # os.kill(pid, 0) returns True for zombies too,
+            # so we also check the process state via /proc
+            with open(f"/proc/{pid}/stat") as f:
+                stat = f.read().split()
+            state = stat[2] if len(stat) > 2 else ""
+            # Z = zombie, x = dead, X = stopped
+            return state not in ("Z", "zombie", "x", "X")
+        except (ProcessLookupError, FileNotFoundError, PermissionError):
             return False
 
     def _pid_matches(self, pid: int, path: Path) -> bool:
