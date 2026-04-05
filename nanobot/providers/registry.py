@@ -73,6 +73,14 @@ class ProviderSpec:
 # ---------------------------------------------------------------------------
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
+    # === One API (OpenAI-compatible gateway) =================================
+    ProviderSpec(
+        name="oneapi",
+        keywords=("oneapi",),
+        env_key="ONEAPI_API_KEY",
+        display_name="One API",
+        backend="openai_compat",
+    ),
     # === Custom (direct OpenAI-compatible endpoint) ========================
     ProviderSpec(
         name="custom",
@@ -184,6 +192,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
 
 
     # === Standard providers (matched by model-name keywords) ===============
+    # LongCat: Anthropic-compatible endpoint
+    ProviderSpec(
+        name="longcat",
+        keywords=("longcat",),
+        env_key="LONGCAT_API_KEY",
+        display_name="LongCat",
+        backend="anthropic",
+        default_api_base="https://api.longcat.chat/anthropic/v1",
+        detect_by_key_prefix="ak_",
+        supports_prompt_caching=True,
+    ),
     # Anthropic: native Anthropic SDK
     ProviderSpec(
         name="anthropic",
