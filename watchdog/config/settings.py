@@ -46,7 +46,7 @@ monitors:
       - start
 
   qq:
-    log_file: ~/.nanobot/slot_b/workspace/nanobot_gateway.log
+    log_file: ~/.nanobot/workspace/lof_monitor/nanobot_gateway.log
     check_interval: 10.0
     reconnect_keywords:
       - "4009"
