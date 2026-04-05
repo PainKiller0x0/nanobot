@@ -18,10 +18,18 @@ def _setup_logging(level: str = "INFO"):
     import loguru
 
     loguru.logger.remove()
+    log_file = Path.home() / ".nanobot" / "watchdog.log"
     loguru.logger.add(
         sys.stderr,
         format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
         level=level,
+    )
+    loguru.logger.add(
+        log_file,
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+        level=level,
+        rotation="10 MB",
+        retention="3 days",
     )
 
 
