@@ -64,7 +64,6 @@ class RestartArkAction(Action):
         try:
             subprocess.run(["pkill", "-f", "nanobot gateway"], timeout=10, capture_output=True)
             subprocess.run(["pkill", "-f", "nanobot ark"], timeout=10, capture_output=True)
-            subprocess.run(["pkill", "-f", "ark_entry/manager"], timeout=10, capture_output=True)
         except Exception as e:
             logger.warning(f"pkill failed: {e}")
 

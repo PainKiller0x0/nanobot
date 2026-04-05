@@ -5,7 +5,7 @@ import sys
 
 # Fast path: nanobot ark → delegate to nanobot.ark (avoids loading full nanobot)
 if len(sys.argv) > 1 and sys.argv[1] == "ark":
-    from nanobot.ark.cli import app
+    from ark.cli import app
     sys.argv = [sys.argv[0]] + sys.argv[2:]
 else:
     from nanobot.cli.commands import app

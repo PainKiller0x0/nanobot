@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from nanobot.ark.slot_manager import SlotManager
+from ark.slot_manager import SlotManager
 
 NANOBOT_ROOT = Path.home() / ".nanobot"
 PENDING_SWITCH_FILE = NANOBOT_ROOT / "pending_switch"

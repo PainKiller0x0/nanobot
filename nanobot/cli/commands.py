@@ -637,7 +637,7 @@ def gateway(
     """Start the nanobot gateway."""
     # Shadow mode: run as standby shadow gateway
     if shadow_mode:
-        from nanobot.ark.shadow_gateway import ShadowGateway
+        from ark.shadow_gateway import ShadowGateway
         import logging
 
         if verbose:
@@ -1493,7 +1493,7 @@ def _login_github_copilot() -> None:
 
 # Lazy-load ARK subcommands to avoid slow imports at startup
 try:
-    from nanobot.ark.cli import app as ark_app
+    from ark.cli import app as ark_app
     app.add_typer(ark_app, name="ark")
 except ImportError:
     pass  # ark not available (e.g., during initial setup)

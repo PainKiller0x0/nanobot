@@ -3,7 +3,7 @@ Standalone shadow gateway entry point.
 Does NOT import the nanobot package — stays lightweight in standby mode.
 
 Usage:
-    python ark_entry/shadow.py --port 8081
+    python ark/shadow.py --port 8081
 """
 from __future__ import annotations
 

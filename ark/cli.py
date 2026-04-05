@@ -236,7 +236,7 @@ def update_stable(tag: str | None = typer.Option(None, help="Tag name for this s
     import subprocess
     from pathlib import Path
 
-    nanobot_root = Path(__file__).parent.parent.parent
+    nanobot_root = Path(__file__).parent.parent
     stable_ref_path = Path.home() / ".nanobot/ark/stable_ref"
 
     # 获取当前 commit
@@ -277,7 +277,7 @@ def stable_status():
     import subprocess
     from pathlib import Path
 
-    nanobot_root = Path(__file__).parent.parent.parent
+    nanobot_root = Path(__file__).parent.parent
     stable_ref_path = Path.home() / ".nanobot/ark/stable_ref"
 
     if not stable_ref_path.exists():

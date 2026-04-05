@@ -2,8 +2,8 @@
 Entry point for running nanobot ark as a module.
 
 Usage:
-    python -m nanobot.ark                          # ark CLI
-    python -m nanobot.ark --shadow-mode --port 8081  # shadow gateway (bypasses nanobot gateway import chain)
+    python -m ark                          # ark CLI
+    python -m ark --shadow-mode --port 8081  # shadow gateway (bypasses nanobot gateway import chain)
 """
 import argparse
 import asyncio
@@ -28,7 +28,7 @@ def main():
         import logging
         logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 
-        from nanobot.ark.shadow_gateway import ShadowGateway
+        from ark.shadow_gateway import ShadowGateway
 
         asyncio.run(
             ShadowGateway(
@@ -40,7 +40,7 @@ def main():
         )
     else:
         # Default: run ark CLI
-        from nanobot.ark.cli import app
+        from ark.cli import app
         app()
 
 
