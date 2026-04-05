@@ -26,7 +26,7 @@ class RestartArkAction(Action):
         workspace: str = "~/.nanobot",
     ):
         super().__init__()
-        self.restart_command = restart_command or ["python3", "-m", "nanobot", "ark", "start"]
+        self.restart_command = restart_command or ["/root/nanobot/venv/bin/python3", "-m", "nanobot", "ark", "start"]
         self.workspace = Path(os.path.expanduser(workspace))
 
     def execute(self, status) -> bool:
