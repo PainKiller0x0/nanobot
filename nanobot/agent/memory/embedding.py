@@ -13,9 +13,6 @@ from typing import Union, List
 
 import numpy as np
 
-# Use ONNX path — zero torch at runtime.
-from nanobot.embedding import ONNXEmbeddingGenerator as _ONNXGen
-
 
 class EmbeddingGenerator:
     """
@@ -24,10 +21,17 @@ class EmbeddingGenerator:
     """
 
     def __init__(self, cache_dir: Path = None, model_name: str = None):
-        # model_name is ignored (ONNX model is fixed); kept for API compat.
-        _cache = cache_dir or (Path.home() / ".nanobot" / "embedding_cache")
+        _cache = cache_dir or (Path.home() / '.nanobot' / 'embedding_cache')
         _cache.mkdir(parents=True, exist_ok=True)
-        self._onnx = _ONNXGen(cache_dir=_cache)
+        self.cache_dir = _cache
+        self._onnx_instance = None
+
+    @property
+    def onnx(self):
+        if self._onnx_instance is None:
+            from nanobot.embedding import ONNXEmbeddingGenerator as _ONNXGen
+            self._onnx_instance = _ONNXGen(cache_dir=self.cache_dir)
+        return self._onnx_instance
 
     def encode(
         self,
@@ -50,9 +54,9 @@ class EmbeddingGenerator:
         if use_cache:
             for i, t in enumerate(texts):
                 key = hashlib.md5(t.encode()).hexdigest()
-                path = self._onnx.cache_dir / f"{key}.pkl"
+                path = self.cache_dir / f'{key}.pkl'
                 if path.exists():
-                    with open(path, "rb") as f:
+                    with open(path, 'rb') as f:
                         results.append((i, pickle.load(f)))
                 else:
                     to_encode.append(t)
@@ -63,7 +67,7 @@ class EmbeddingGenerator:
 
         # Encode missing
         if to_encode:
-            embeddings = self._onnx.encode(to_encode)
+            embeddings = self.onnx.encode(to_encode)
             if compress:
                 embeddings = embeddings.astype(np.float16)
             for j, emb in enumerate(embeddings):
@@ -73,8 +77,8 @@ class EmbeddingGenerator:
                 if use_cache:
                     t = to_encode[j]
                     key = hashlib.md5(t.encode()).hexdigest()
-                    path = self._onnx.cache_dir / f"{key}.pkl"
-                    with open(path, "wb") as f:
+                    path = self.cache_dir / f'{key}.pkl'
+                    with open(path, 'wb') as f:
                         pickle.dump(emb, f, protocol=pickle.HIGHEST_PROTOCOL)
 
         # Restore original order
@@ -84,4 +88,4 @@ class EmbeddingGenerator:
         return np.stack([r[1] for r in results])
 
     def cosine_similarity(self, a: np.ndarray, b: np.ndarray) -> float:
-        return self._onnx.cosine_similarity(a, b)
+        return self.onnx.cosine_similarity(a, b)

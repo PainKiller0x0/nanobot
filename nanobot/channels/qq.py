@@ -39,6 +39,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
+from nanobot.llm_switcher import llm_switcher, parse_switch_command
 
 try:
     from nanobot.config.paths import get_media_dir
@@ -531,6 +532,7 @@ class QQChannel(BaseChannel):
 
         if not content and not media_paths:
             return
+
 
         msg_timestamp = _parse_qq_timestamp(data.timestamp)
 

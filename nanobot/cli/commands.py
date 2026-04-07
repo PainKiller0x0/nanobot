@@ -611,7 +611,7 @@ def serve(
         await agent_loop._connect_mcp()
 
     async def on_cleanup(_app):
-        await agent_loop.close_mcp()
+        if hasattr(agent_loop, "close_mcp"): await agent_loop.close_mcp()
 
     api_app.on_startup.append(on_startup)
     api_app.on_cleanup.append(on_cleanup)
@@ -928,7 +928,8 @@ def gateway(
             # 3. Close channels gracefully
             await channels.stop_all()
             # 4. Close MCP connections
-            await agent.close_mcp()
+            if hasattr(agent, "close_mcp"):
+                await agent.close_mcp()
             shutdown_complete.set()
 
         def _sigterm_handler():
@@ -1047,7 +1048,7 @@ def agent(
                     render_markdown=markdown,
                     metadata=response.metadata if response else None,
                 )
-            await agent_loop.close_mcp()
+            if hasattr(agent_loop, "close_mcp"): await agent_loop.close_mcp()
 
         asyncio.run(run_once())
     else:
@@ -1182,7 +1183,7 @@ def agent(
                 agent_loop.stop()
                 outbound_task.cancel()
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
-                await agent_loop.close_mcp()
+                if hasattr(agent_loop, "close_mcp"): await agent_loop.close_mcp()
 
         asyncio.run(run_interactive())
 

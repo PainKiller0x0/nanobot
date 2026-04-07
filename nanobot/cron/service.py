@@ -238,29 +238,45 @@ class CronService:
         delay_s = delay_ms / 1000
 
         async def tick():
-            await asyncio.sleep(delay_s)
-            if self._running:
-                await self._on_timer()
+            try:
+                await asyncio.sleep(delay_s)
+                if self._running:
+                    await self._on_timer()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error("Cron: tick execution failed: {}", e)
+                # Retry arming after a short delay on unexpected failure
+                await asyncio.sleep(5)
+                self._arm_timer()
 
         self._timer_task = asyncio.create_task(tick())
 
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""
-        self._load_store()
-        if not self._store:
-            return
+        try:
+            self._load_store()
+            if not self._store:
+                return
 
-        now = _now_ms()
-        due_jobs = [
-            j for j in self._store.jobs
-            if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
-        ]
+            now = _now_ms()
+            due_jobs = [
+                j for j in self._store.jobs
+                if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
+            ]
 
-        for job in due_jobs:
-            await self._execute_job(job)
+            for job in due_jobs:
+                try:
+                    await self._execute_job(job)
+                except Exception as e:
+                    logger.error("Cron: job execution exploded: {}", e)
 
-        self._save_store()
-        self._arm_timer()
+            self._save_store()
+        except Exception as e:
+            logger.error("Cron: on_timer loop failed: {}", e)
+        finally:
+            if self._running:
+                self._arm_timer()
 
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""

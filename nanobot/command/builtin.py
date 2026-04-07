@@ -84,20 +84,69 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=build_help_text(),
+        metadata={"render_as": "text"},
+    )
+
+
+async def cmd_mode(ctx: CommandContext) -> OutboundMessage:
+    """Switch LLM mode (hard/easy) dynamically by modifying runtime_config.yaml."""
+    args = ctx.args.strip().lower()
+    if args not in ("hard", "normal", "easy"):
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="Usage: `/mode hard` or `/mode normal` (easy)"
+        )
+    
+    target_mode = "hard" if args == "hard" else "normal"
+    
+    import re
+    from pathlib import Path
+    config_path = Path.home() / ".nanobot" / "runtime_config.yaml"
+    
+    if not config_path.exists():
+         return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content=f"Error: `runtime_config.yaml` not found at {config_path}."
+        )
+
+    try:
+        content = config_path.read_text(encoding="utf-8")
+        # Regex to update active_provider robustly
+        new_content = re.sub(
+            r'^(\s*active_provider\s*:\s*)["\']?.*?["\']?(\s*#.*)?$',
+            rf'\g<1>"{target_mode}"\g<2>',
+            content,
+            flags=re.MULTILINE
+        )
+        config_path.write_text(new_content, encoding="utf-8")
+    except Exception as e:
+         return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content=f"Error updating config: {e}"
+        )
+
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content=f"✅ Switched mode to: **{target_mode.upper()}** (Changes applied to runtime_config.yaml)"
+    )
+
+
+def build_help_text() -> str:
+    """Build canonical help text shared across channels."""
     lines = [
         "🐈 nanobot commands:",
         "/new — Start a new conversation",
         "/stop — Stop the current task",
         "/restart — Restart the bot",
+        "/mode <hard|normal> — Switch model mode natively",
         "/status — Show bot status",
         "/help — Show available commands",
     ]
-    return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
-        content="\n".join(lines),
-        metadata={"render_as": "text"},
-    )
+    return "\n".join(lines)
 
 
 def register_builtin_commands(router: CommandRouter) -> None:
@@ -108,3 +157,4 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
     router.exact("/help", cmd_help)
+    router.prefix("/mode ", cmd_mode)

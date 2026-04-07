@@ -14,6 +14,8 @@ import json_repair
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.llm_switcher import llm_switcher
+from loguru import logger
 
 if TYPE_CHECKING:
     from nanobot.providers.registry import ProviderSpec
@@ -231,7 +233,8 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
     ) -> dict[str, Any]:
-        model_name = model or self.default_model
+        # Always use llm_switcher to get the correct model name
+        model_name = llm_switcher.get_model()
         spec = self._spec
 
         if spec and spec.supports_prompt_caching:
@@ -550,10 +553,34 @@ class OpenAICompatProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
-        try:
-            return self._parse(await self._client.chat.completions.create(**kwargs))
-        except Exception as e:
-            return self._handle_error(e)
+        
+        from nanobot.llm_switcher import llm_switcher
+        active_provider = llm_switcher.get_active_provider()
+        
+        from nanobot.config.runtime_config import runtime_config
+        llm_api_base = runtime_config.get(f"llm.providers.{active_provider}.api_base", None)
+        
+        client = self._client
+        if llm_api_base and llm_api_base != str(self._client.base_url):
+            from openai import AsyncOpenAI
+            llm_api_key = runtime_config.get(f"llm.providers.{active_provider}.api_key", self._client.api_key)
+            client = AsyncOpenAI(api_key=llm_api_key or "no-key", base_url=llm_api_base)
+        
+        for attempt in range(2):
+            try:
+                response = await client.chat.completions.create(**kwargs)
+                parsed = self._parse(response)
+                if parsed.content == "Error: API returned empty choices." and attempt == 0:
+                    from loguru import logger
+                    logger.warning("Empty choices on first attempt, retrying...")
+                    continue
+                return parsed
+            except Exception as e:
+                if attempt == 0:
+                    from loguru import logger
+                    logger.warning("Error on first attempt, retrying: {}", e)
+                    continue
+                return self._handle_error(e)
 
     async def chat_stream(
         self,
