@@ -35,5 +35,8 @@ jobs:
     - name: Lint with ruff
       run: uv run ruff check nanobot --select F401,F841
 
-    - name: Run tests
+    - name: Run smoke regression
+      run: bash scripts/run_smoke.sh
+
+    - name: Run full tests
       run: uv run pytest tests/
