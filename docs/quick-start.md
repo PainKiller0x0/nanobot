@@ -1,104 +1,78 @@
-# Install and Quick Start
+# Quick Start (nanobot-exp)
 
-## Install
+This page provides the shortest usable setup for nanobot-exp.
 
-> [!IMPORTANT]
-> This README may describe features that are available first in the latest source code.
-> If you want the newest features and experiments, install from source.
-> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
-
-**Install from source** (latest features, experimental changes may land here first; recommended for development)
+## 1. Install
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
+git clone https://github.com/PainKiller0x0/nanobot-exp.git
+cd nanobot-exp
 pip install -e .
 ```
 
-**Install with [uv](https://github.com/astral-sh/uv)** (stable release, fast)
-
-```bash
-uv tool install nanobot-ai
-```
-
-**Install from PyPI** (stable release)
-
-```bash
-pip install nanobot-ai
-```
-
-### Update to latest version
-
-**PyPI / pip**
-
-```bash
-pip install -U nanobot-ai
-nanobot --version
-```
-
-**uv**
-
-```bash
-uv tool upgrade nanobot-ai
-nanobot --version
-```
-
-**Using WhatsApp?** Rebuild the local bridge after upgrading:
-
-```bash
-rm -rf ~/.nanobot/bridge
-nanobot channels login whatsapp
-```
-
-## Quick Start
-
-> [!TIP]
-> Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global)
->
-> For other LLM providers, please see [`configuration.md`](./configuration.md).
->
-> For web search capability setup, please see the web-search section in [`configuration.md`](./configuration.md#web-search).
-
-**1. Initialize**
+## 2. Initialize Config
 
 ```bash
 nanobot onboard
 ```
 
-Use `nanobot onboard --wizard` if you want the interactive setup wizard.
+Default config path:
 
-**2. Configure** (`~/.nanobot/config.json`)
+- Linux/macOS: `~/.nanobot/config.json`
 
-Configure these **two parts** in your config (other options have defaults).
+## 3. Configure Model and API Key
 
-*Set your API key* (e.g. OpenRouter, recommended for global users):
+Edit `~/.nanobot/config.json` with at least:
+
 ```json
 {
   "providers": {
     "openrouter": {
       "apiKey": "sk-or-v1-xxx"
     }
-  }
-}
-```
-
-*Set your model* (optionally pin a provider — defaults to auto-detection):
-```json
-{
+  },
   "agents": {
     "defaults": {
-      "model": "anthropic/claude-opus-4-5",
-      "provider": "openrouter"
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4-5"
     }
   }
 }
 ```
 
-**3. Chat**
+## 4. Start Chat
 
 ```bash
 nanobot agent
 ```
 
-That's it! You have a working AI agent in 2 minutes.
+## 5. Install External Extensions (Optional)
+
+nanobot-exp recommends keeping custom features in a separate extension repo:
+
+```bash
+scripts/install_extentions.sh \
+  --repo git@github.com:YOUR_ORG/nanobot-extensions.git \
+  --ref main \
+  --modules extensions.reflexio
+
+source ~/.nanobot/extensions.env
+```
+
+Then start nanobot again.
+
+## 6. Useful Commands
+
+```bash
+nanobot --help
+nanobot channels --help
+nanobot gateway --help
+```
+
+## 7. Troubleshooting
+
+- Config error: validate JSON format in `~/.nanobot/config.json`.
+- Provider error: verify API key and provider/model match.
+- Extension not loaded: confirm `source ~/.nanobot/extensions.env` and check `PYTHONPATH` and `NANOBOT_EXTENSION_MODULES`.
+
+More extension details: [EXTENSIONS_GLUE.md](./EXTENSIONS_GLUE.md)
