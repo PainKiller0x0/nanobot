@@ -7,9 +7,12 @@ These scripts keep `nanobot` core close to upstream by applying runtime changes 
 - `scripts/apply_slim_profile.sh`
 - `scripts/apply_reflexio_glue.sh`
 - `scripts/memory_report.sh`
+- `scripts/memory_budget_check.sh`
+- `scripts/ops_quick_optimize.sh`
 - `scripts/apply_runtime_profiles.sh`
 - `scripts/rollback_runtime_profiles.sh`
 - `scripts/apply_wechat_rss_rs.sh`
+- `scripts/tune_legacy_nanobot_container.sh`
 
 ## 1) Container Slim Profile
 
@@ -72,7 +75,32 @@ scripts/memory_report.sh
 
 Shows host/container/process memory in one report.
 
-## 5) WeChat RSS Rust Migration (Guarded)
+## 5) Memory Budget Check
+
+```bash
+scripts/memory_budget_check.sh --threshold-mib 500
+```
+
+- Exit `0` when under budget.
+- Exit `1` when over budget (CI/cron friendly).
+
+## 6) Quick Optimize (Safe Cleanup)
+
+Dry run:
+
+```bash
+scripts/ops_quick_optimize.sh
+```
+
+Apply:
+
+```bash
+scripts/ops_quick_optimize.sh --apply
+```
+
+This cleans stale `/tmp/nanobot-ext-test` git jobs and old `app.py.bak_*` files.
+
+## 7) WeChat RSS Rust Migration (Guarded)
 
 ```bash
 scripts/apply_wechat_rss_rs.sh
@@ -89,6 +117,16 @@ Example:
 ```bash
 scripts/apply_wechat_rss_rs.sh --apply
 ```
+
+## 8) Legacy Container Tuning
+
+If the runtime still uses `nanobot-cage` legacy deployment:
+
+```bash
+scripts/tune_legacy_nanobot_container.sh --apply
+```
+
+This recreates `nanobot-cage` with memory-focused env and `--memory/--cpus` limits, with rollback backup container.
 
 ## Rollback
 

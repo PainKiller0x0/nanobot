@@ -75,6 +75,7 @@ scripts/run_smoke.sh
 - Quick start / 快速开始: [docs/quick-start.md](./docs/quick-start.md)
 - Extension glue / 扩展胶水安装: [docs/EXTENSIONS_GLUE.md](./docs/EXTENSIONS_GLUE.md)
 - Runtime patch scripts / 运行时补丁脚本: [docs/RUNTIME_PATCH_SCRIPTS.md](./docs/RUNTIME_PATCH_SCRIPTS.md)
+- Memory budget check / 内存预算检查: `scripts/memory_budget_check.sh --threshold-mib 500`
 - Upstream docs / 上游文档: https://nanobot.wiki/docs/latest/getting-started/nanobot-overview
 
 ## Upstream Sync / 上游同步
