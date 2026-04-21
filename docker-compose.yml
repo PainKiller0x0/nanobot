@@ -1,48 +1,55 @@
+x-common-config: &common-config
+  build:
+    context: .
+    dockerfile: Dockerfile
+  volumes:
+    - ~/.nanobot:/home/nanobot/.nanobot
+  cap_drop:
+    - ALL
+  cap_add:
+    - SYS_ADMIN
+  security_opt:
+    - apparmor=unconfined
+    - seccomp=unconfined
+
 services:
-  nanobot:
-    build: .
-    container_name: nanobot-cage
-    user: root
-    privileged: true
+  nanobot-gateway:
+    container_name: nanobot-gateway
+    <<: *common-config
+    command: ["gateway"]
+    restart: unless-stopped
     ports:
-      - "8080:8080"
-    volumes:
-      - /root/.nanobot:/root/.nanobot
-      - /root/nanobot:/app
-      - /etc/localtime:/etc/localtime:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-    restart: always
-    mem_limit: 900m
-    memswap_limit: 1400m
-    cpus: 1.2
-    environment:
-      - NANOBOT_CONFIG=/root/.nanobot/config.json
-      - TZ=Asia/Shanghai
-      - NANOBOT_EXTENSION_MODULES=extensions.reflexio
-      - NANOBOT_PROVIDER_FAILOVER_MODULE=extensions.provider_failover
-      - REFLEXIO_URL=http://172.17.0.1:8081
-      - NANOBOT_FAILOVER_SETTINGS_URL=http://150.158.121.88:8000/admin/failover
-    networks:
-      - bot-net
+      - 18790:18790
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
-  wechat-rss-sidecar:
-    image: python:3.11-slim
-    container_name: wechat-rss-sidecar
-    user: root
-    working_dir: /root/.nanobot/workspace/wechat_rss_service
-    command: sh -lc "WECHAT_RSS_HOST=0.0.0.0 WECHAT_RSS_PORT=8091 python3 app.py"
+  nanobot-api:
+    container_name: nanobot-api
+    <<: *common-config
+    command:
+      ["serve", "--host", "0.0.0.0", "-w", "/home/nanobot/.nanobot/api-workspace"]
+    restart: unless-stopped
     ports:
-      - "8091:8091"
-    volumes:
-      - /root/.nanobot:/root/.nanobot
-      - /root/nanobot:/root/nanobot:ro
-    restart: always
-    mem_limit: 180m
-    memswap_limit: 300m
-    cpus: 0.3
-    networks:
-      - bot-net
+      - 127.0.0.1:8900:8900
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
-networks:
-  bot-net:
-    driver: bridge
+  nanobot-cli:
+    <<: *common-config
+    profiles:
+      - cli
+    command: ["status"]
+    stdin_open: true
+    tty: true

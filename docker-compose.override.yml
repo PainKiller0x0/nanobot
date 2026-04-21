@@ -1,6 +1,0 @@
-services:
-  nanobot:
-    working_dir: /app
-    environment:
-      PYTHONPATH: /app
-    command: ["sh", "-lc", "python /root/.nanobot/overrides/apply_overrides.py && python -m nanobot.cli.commands gateway"]
