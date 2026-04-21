@@ -6,6 +6,13 @@
 .web
 .orion
 
+# webui (monorepo frontend)
+webui/node_modules/
+webui/dist/
+webui/coverage/
+webui/.vite/
+*.tsbuildinfo
+
 # Python bytecode & caches
 *.pyc
 *.pyo
@@ -85,10 +92,3 @@ logs/
 tmp/
 temp/
 *.tmp
-# Local backup / experimental artifacts
-*.bak
-*.bak_*
-*.bak.*
-
-# Optional extension local data
-wechat_subscriptions.txt
