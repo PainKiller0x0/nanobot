@@ -8,10 +8,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-import httpx
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.extensions import build_context_blocks
 from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime
 from nanobot.utils.prompt_templates import render_template
 
@@ -30,36 +30,6 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
-
-    REFLEXIO_URL = os.environ.get('REFLEXIO_URL', 'http://reflexio-sidecar:8081')
-
-    def _fetch_reflexio_memories(self, query: str) -> str | None:
-        """Fetch relevant memories from reflexio-rs via semantic search."""
-        if not query or len(query.strip()) < 2:
-            return None
-        try:
-            resp = httpx.post(
-                f'{self.REFLEXIO_URL}/api/search',
-                json={'query': query, 'limit': 5},
-                timeout=3.0,
-            )
-            if not resp.is_success:
-                return None
-            data = resp.json()
-            results = data.get('results', [])
-            relevant = [r for r in results if r.get('score', 0) >= 0.5]
-            if not relevant:
-                return None
-            lines = ['[Memory — These are real facts from past conversations with this user, retrieved via semantic search. Trust this information and use it naturally.]']
-            for r in relevant:
-                kind = r.get('kind', 'memory')
-                content_text = r.get('content', '')
-                score = r.get('score', 0)
-                lines.append(f'- ({kind}, relevance: {score:.0%}) {content_text}')
-            lines.append('[/Memory]')
-            return '\n'.join(lines)
-        except Exception:
-            return None
 
     def build_system_prompt(
         self,
@@ -171,9 +141,9 @@ class ContextBuilder:
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
         system_prompt = self.build_system_prompt(skill_names, channel=channel)
-        memories = self._fetch_reflexio_memories(current_message)
-        if memories:
-            system_prompt = f"{system_prompt}\n\n---\n\n{memories}"
+        extension_blocks = build_context_blocks(current_message)
+        if extension_blocks:
+            system_prompt = f"{system_prompt}\n\n---\n\n" + "\n\n---\n\n".join(extension_blocks)
         messages = [
             {"role": "system", "content": system_prompt},
             *history,

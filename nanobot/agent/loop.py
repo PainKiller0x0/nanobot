@@ -20,7 +20,7 @@ from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
-from nanobot.agent.reflexio_hook import ReflexioHook
+from nanobot.agent.extensions import load_agent_hooks
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -246,8 +246,8 @@ class AgentLoop:
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
-        # Reflexio Auto-Reflection Hook
-        self._extra_hooks.append(ReflexioHook(self.bus))
+        # Optional extension hooks loaded via NANOBOT_EXTENSION_MODULES
+        self._extra_hooks.extend(load_agent_hooks(self.bus))
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""

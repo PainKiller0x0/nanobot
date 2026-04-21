@@ -18,7 +18,7 @@ services:
     environment:
       - NANOBOT_CONFIG=/root/.nanobot/config.json
       - TZ=Asia/Shanghai
-      - NANOBOT_REFLEXIO_ENABLED=true
+      - NANOBOT_EXTENSION_MODULES=extensions.reflexio
       - REFLEXIO_URL=http://172.17.0.1:8081
       - NANOBOT_FAILOVER_SETTINGS_URL=http://150.158.121.88:8000/admin/failover
     networks:
