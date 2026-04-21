@@ -1195,10 +1195,15 @@ app.add_typer(channels_app, name="channels")
 
 
 @channels_app.command("status")
-def channels_status():
+def channels_status(
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
     """Show channel status."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_config, set_config_path
+
+    if config:
+        set_config_path(Path(config).expanduser().resolve())
 
     config = load_config()
 
@@ -1287,10 +1292,14 @@ def _get_bridge_dir() -> Path:
 def channels_login(
     channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
     force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_config, set_config_path
+
+    if config:
+        set_config_path(Path(config).expanduser().resolve())
 
     config = load_config()
     channel_cfg = getattr(config.channels, channel_name, None) or {}
