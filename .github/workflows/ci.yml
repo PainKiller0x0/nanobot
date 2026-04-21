@@ -35,8 +35,13 @@ jobs:
     - name: Install system dependencies
       run: sudo apt-get update && sudo apt-get install -y libolm-dev build-essential
 
-    - name: Sync dependencies (locked)
-      run: uv sync --all-extras --frozen
+    - name: Sync dependencies
+      run: |
+        if [ -f uv.lock ]; then
+          uv sync --all-extras --frozen
+        else
+          uv sync --all-extras
+        fi
 
     - name: Lint with ruff
       run: uv run --no-sync ruff check nanobot --select F401,F841
