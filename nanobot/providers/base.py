@@ -1,10 +1,7 @@
 """Base LLM provider interface."""
 
 import asyncio
-import importlib
-import inspect
 import json
-import os
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
@@ -165,66 +162,6 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.api_base = api_base
         self.generation: GenerationSettings = GenerationSettings()
-        self._failover_plugin = self._load_failover_plugin()
-
-    @staticmethod
-    def _load_failover_plugin():
-        module_name = os.environ.get("NANOBOT_PROVIDER_FAILOVER_MODULE", "").strip()
-        if not module_name:
-            return None
-        try:
-            return importlib.import_module(module_name)
-        except Exception:
-            logger.exception("Failed to load provider failover plugin: {}", module_name)
-            return None
-
-    async def _maybe_failover(
-        self,
-        *,
-        phase: str,
-        stream: bool,
-        response: LLMResponse | None = None,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None,
-        model: str | None,
-        max_tokens: Any,
-        temperature: Any,
-        reasoning_effort: Any,
-        tool_choice: str | dict[str, Any] | None,
-        retry_mode: str,
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
-        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
-    ) -> LLMResponse | None:
-        plugin = self._failover_plugin
-        if plugin is None:
-            return None
-        handler = getattr(plugin, "maybe_failover", None)
-        if not callable(handler):
-            return None
-        try:
-            result = handler(
-                provider=self,
-                phase=phase,
-                stream=stream,
-                response=response,
-                messages=messages,
-                tools=tools,
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                reasoning_effort=reasoning_effort,
-                tool_choice=tool_choice,
-                retry_mode=retry_mode,
-                on_retry_wait=on_retry_wait,
-                on_content_delta=on_content_delta,
-            )
-            if inspect.isawaitable(result):
-                result = await result
-            if isinstance(result, LLMResponse):
-                return result
-        except Exception:
-            logger.exception("Provider failover plugin error (phase={} stream={})", phase, stream)
-        return None
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -604,53 +541,19 @@ class LLMProvider(ABC):
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
 
-        pre = await self._maybe_failover(
-            phase="before",
-            stream=True,
-            response=None,
-            messages=messages,
-            tools=tools,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            tool_choice=tool_choice,
-            retry_mode=retry_mode,
-            on_retry_wait=on_retry_wait,
-            on_content_delta=on_content_delta,
-        )
-        if pre is not None:
-            return pre
-
         kw: dict[str, Any] = dict(
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
             on_content_delta=on_content_delta,
         )
-        response = await self._run_with_retry(
+        return await self._run_with_retry(
             self._safe_chat_stream,
             kw,
             messages,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
         )
-        post = await self._maybe_failover(
-            phase="after",
-            stream=True,
-            response=response,
-            messages=messages,
-            tools=tools,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            tool_choice=tool_choice,
-            retry_mode=retry_mode,
-            on_retry_wait=on_retry_wait,
-            on_content_delta=on_content_delta,
-        )
-        return post if post is not None else response
 
     async def chat_with_retry(
         self,
@@ -680,50 +583,18 @@ class LLMProvider(ABC):
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
 
-        pre = await self._maybe_failover(
-            phase="before",
-            stream=False,
-            response=None,
-            messages=messages,
-            tools=tools,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            tool_choice=tool_choice,
-            retry_mode=retry_mode,
-            on_retry_wait=on_retry_wait,
-        )
-        if pre is not None:
-            return pre
-
         kw: dict[str, Any] = dict(
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
-        response = await self._run_with_retry(
+        return await self._run_with_retry(
             self._safe_chat,
             kw,
             messages,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
         )
-        post = await self._maybe_failover(
-            phase="after",
-            stream=False,
-            response=response,
-            messages=messages,
-            tools=tools,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            tool_choice=tool_choice,
-            retry_mode=retry_mode,
-            on_retry_wait=on_retry_wait,
-        )
-        return post if post is not None else response
 
     @classmethod
     def _extract_retry_after(cls, content: str | None) -> float | None:
