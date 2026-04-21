@@ -13,6 +13,9 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
 
+    env:
+      UV_PYTHON_PREFERENCE: only-system
+
     steps:
     - uses: actions/checkout@v4
 
@@ -21,17 +24,22 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Install uv
+    - name: Set up uv (with cache)
       uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+        cache-dependency-glob: |
+          uv.lock
+          pyproject.toml
 
     - name: Install system dependencies
       run: sudo apt-get update && sudo apt-get install -y libolm-dev build-essential
 
-    - name: Install all dependencies
-      run: uv sync --all-extras
+    - name: Sync dependencies (locked)
+      run: uv sync --all-extras --frozen
 
     - name: Lint with ruff
-      run: uv run ruff check nanobot --select F401,F841
+      run: uv run --no-sync ruff check nanobot --select F401,F841
 
     - name: Run tests
-      run: uv run pytest tests/
+      run: uv run --no-sync pytest tests/
