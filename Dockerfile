@@ -1,20 +1,50 @@
-FROM python:3.11-slim
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+# Install Node.js 20 for the WhatsApp bridge
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates gnupg git bubblewrap openssh-client && \
+    mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends nodejs && \
+    apt-get purge -y gnupg && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-RUN sed -i "s/deb.debian.org/mirrors.aliyun.com/g" /etc/apt/sources.list.d/debian.sources && apt-get update && apt-get install -y --no-install-recommends curl git tmux gcc python3-dev tzdata ca-certificates gnupg lsb-release && mkdir -p /etc/apt/keyrings && curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && apt-get update && apt-get install -y docker-ce-cli && rm -rf /var/lib/apt/lists/*
+# Install Python dependencies first (cached layer)
+COPY pyproject.toml README.md LICENSE ./
+RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
+    uv pip install --system --no-cache . && \
+    rm -rf nanobot bridge
 
-ENV TZ=Asia/Shanghai
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+# Copy the full source and install
+COPY nanobot/ nanobot/
+COPY bridge/ bridge/
+RUN uv pip install --system --no-cache .
 
-RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && pip install --no-cache-dir numpy pandas tiktoken lxml html5lib jinja2
+# Build the WhatsApp bridge
+WORKDIR /app/bridge
+RUN git config --global --add url."https://github.com/".insteadOf ssh://git@github.com/ && \
+    git config --global --add url."https://github.com/".insteadOf git@github.com: && \
+    npm install && npm run build
+WORKDIR /app
 
-COPY . .
-RUN pip install --no-cache-dir .
-RUN pip uninstall -y nanobot-ai
+# Create non-root user and config directory
+RUN useradd -m -u 1000 -s /bin/bash nanobot && \
+    mkdir -p /home/nanobot/.nanobot && \
+    chown -R nanobot:nanobot /home/nanobot /app
 
-ENV PYTHONUNBUFFERED=1
-ENV ARK_SLOT_WORKSPACE=/root/.nanobot/workspace
-ENV PYTHONPATH=/app
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
 
-CMD ["python", "-m", "nanobot", "gateway", "--port", "8080"]
+USER nanobot
+ENV HOME=/home/nanobot
+
+# Gateway default port
+EXPOSE 18790
+
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["status"]
