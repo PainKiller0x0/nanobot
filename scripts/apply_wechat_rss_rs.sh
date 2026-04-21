@@ -75,7 +75,7 @@ fi
 
 echo "[wechat-rs] building image: $IMAGE"
 docker build -t "$IMAGE" -f - "$RS_REPO" <<'DOCKERFILE'
-FROM rust:1.82-bookworm AS build
+FROM rust:1.90-bookworm AS build
 WORKDIR /src
 COPY . .
 RUN cargo build --release
