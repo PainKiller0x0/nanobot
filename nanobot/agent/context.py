@@ -3,14 +3,12 @@
 import base64
 import mimetypes
 import platform
-
+from importlib.resources import files as pkg_files
 from pathlib import Path
 from typing import Any
 
-
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-from nanobot.agent.extensions import build_context_blocks
 from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime
 from nanobot.utils.prompt_templates import render_template
 
@@ -29,7 +27,6 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
-
     def build_system_prompt(
         self,
         skill_names: list[str] | None = None,
@@ -43,7 +40,7 @@ class ContextBuilder:
             parts.append(bootstrap)
 
         memory = self.memory.get_memory_context()
-        if memory:
+        if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
@@ -52,7 +49,7 @@ class ContextBuilder:
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
-        skills_summary = self.skills.build_skills_summary()
+        skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
@@ -118,6 +115,17 @@ class ContextBuilder:
 
         return "\n\n".join(parts) if parts else ""
 
+    @staticmethod
+    def _is_template_content(content: str, template_path: str) -> bool:
+        """Check if *content* is identical to the bundled template (user hasn't customized it)."""
+        try:
+            tpl = pkg_files("nanobot") / "templates" / template_path
+            if tpl.is_file():
+                return content.strip() == tpl.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+        return False
+
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -139,12 +147,8 @@ class ContextBuilder:
             merged = f"{runtime_ctx}\n\n{user_content}"
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
-        system_prompt = self.build_system_prompt(skill_names, channel=channel)
-        extension_blocks = build_context_blocks(current_message)
-        if extension_blocks:
-            system_prompt = f"{system_prompt}\n\n---\n\n" + "\n\n---\n\n".join(extension_blocks)
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel)},
             *history,
         ]
         if messages[-1].get("role") == current_role:
