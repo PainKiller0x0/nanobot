@@ -1,106 +1,104 @@
-# Quick Start (nanobot-exp) / 快速开始（nanobot-exp）
+# Install and Quick Start
 
-This page provides the shortest usable setup for nanobot-exp.
+## Install
 
-本页提供 nanobot-exp 的最短可用配置路径。
+> [!IMPORTANT]
+> This README may describe features that are available first in the latest source code.
+> If you want the newest features and experiments, install from source.
+> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
 
-## 1. Install / 安装
+**Install from source** (latest features, experimental changes may land here first; recommended for development)
 
 ```bash
-git clone https://github.com/PainKiller0x0/nanobot-exp.git
-cd nanobot-exp
+git clone https://github.com/HKUDS/nanobot.git
+cd nanobot
 pip install -e .
 ```
 
-## 2. Initialize Config / 初始化配置
+**Install with [uv](https://github.com/astral-sh/uv)** (stable release, fast)
+
+```bash
+uv tool install nanobot-ai
+```
+
+**Install from PyPI** (stable release)
+
+```bash
+pip install nanobot-ai
+```
+
+### Update to latest version
+
+**PyPI / pip**
+
+```bash
+pip install -U nanobot-ai
+nanobot --version
+```
+
+**uv**
+
+```bash
+uv tool upgrade nanobot-ai
+nanobot --version
+```
+
+**Using WhatsApp?** Rebuild the local bridge after upgrading:
+
+```bash
+rm -rf ~/.nanobot/bridge
+nanobot channels login whatsapp
+```
+
+## Quick Start
+
+> [!TIP]
+> Set your API key in `~/.nanobot/config.json`.
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global)
+>
+> For other LLM providers, please see [`configuration.md`](./configuration.md).
+>
+> For web search capability setup, please see the web-search section in [`configuration.md`](./configuration.md#web-search).
+
+**1. Initialize**
 
 ```bash
 nanobot onboard
 ```
 
-Default config path / 默认配置路径：
+Use `nanobot onboard --wizard` if you want the interactive setup wizard.
 
-- Linux/macOS: `~/.nanobot/config.json`
+**2. Configure** (`~/.nanobot/config.json`)
 
-## 3. Configure Model and API Key / 配置模型与 API Key
+Configure these **two parts** in your config (other options have defaults).
 
-Edit `~/.nanobot/config.json` with at least:
-
-编辑 `~/.nanobot/config.json`，至少包含：
-
+*Set your API key* (e.g. OpenRouter, recommended for global users):
 ```json
 {
   "providers": {
     "openrouter": {
       "apiKey": "sk-or-v1-xxx"
     }
-  },
+  }
+}
+```
+
+*Set your model* (optionally pin a provider — defaults to auto-detection):
+```json
+{
   "agents": {
     "defaults": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-5"
+      "model": "anthropic/claude-opus-4-5",
+      "provider": "openrouter"
     }
   }
 }
 ```
 
-## 4. Start Chat / 启动对话
+**3. Chat**
 
 ```bash
 nanobot agent
 ```
 
-## 5. Install External Extensions (Optional) / 安装外挂扩展（可选）
-
-nanobot-exp recommends keeping custom features in a separate extension repo:
-
-nanobot-exp 建议将自定义功能放在独立扩展仓库：
-
-```bash
-scripts/install_extentions.sh \
-  --repo git@github.com:YOUR_ORG/nanobot-extensions.git \
-  --ref v0.3.1 \
-  --modules extensions.reflexio
-
-source ~/.nanobot/extensions.env
-```
-
-Tips / 提示：
-
-- `--ref` supports branch/tag/commit.
-- `--ref` 支持 branch/tag/commit。
-- The installer writes `~/.nanobot/extensions.lock` for rollback and auditing.
-- 安装器会写入 `~/.nanobot/extensions.lock`，用于回滚和审计。
-
-Then restart nanobot.
-
-然后重启 nanobot。
-
-## 6. Fast Smoke Check / 快速冒烟检查
-
-Before push/deploy, run:
-
-在 push / 部署前运行：
-
-```bash
-scripts/run_smoke.sh
-```
-
-## 7. Useful Commands / 常用命令
-
-```bash
-nanobot --help
-nanobot channels --help
-nanobot gateway --help
-```
-
-## 8. Troubleshooting / 故障排查
-
-- Config error: validate JSON format in `~/.nanobot/config.json`.
-- 配置报错：检查 `~/.nanobot/config.json` 是否为合法 JSON。
-- Provider error: verify API key and provider/model match.
-- Provider 报错：确认 API key 与 provider/model 匹配。
-- Extension not loaded: confirm `source ~/.nanobot/extensions.env` and check `PYTHONPATH` / `NANOBOT_EXTENSION_MODULES`.
-- 扩展未加载：确认执行了 `source ~/.nanobot/extensions.env`，并检查 `PYTHONPATH` / `NANOBOT_EXTENSION_MODULES`。
-
-More extension details / 扩展细节： [EXTENSIONS_GLUE.md](./EXTENSIONS_GLUE.md)
+That's it! You have a working AI agent in 2 minutes.
