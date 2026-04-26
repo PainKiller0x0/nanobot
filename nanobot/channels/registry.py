@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import pkgutil
 from typing import TYPE_CHECKING
 
@@ -14,14 +15,26 @@ if TYPE_CHECKING:
 _INTERNAL = frozenset({"base", "manager", "registry"})
 
 
+def _channel_allowlist() -> set[str] | None:
+    """Return allowed channel module names from NANOBOT_CHANNEL_ALLOWLIST."""
+    raw = os.getenv("NANOBOT_CHANNEL_ALLOWLIST", "").strip()
+    if not raw:
+        return None
+    allowed = {part.strip() for part in raw.split(",") if part.strip()}
+    return allowed or None
+
+
 def discover_channel_names() -> list[str]:
-    """Return all built-in channel module names by scanning the package (zero imports)."""
+    """Return built-in channel module names by scanning the package (zero imports)."""
     import nanobot.channels as pkg
 
+    allowed = _channel_allowlist()
     return [
         name
         for _, name, ispkg in pkgutil.iter_modules(pkg.__path__)
-        if name not in _INTERNAL and not ispkg
+        if name not in _INTERNAL
+        and not ispkg
+        and (allowed is None or name in allowed)
     ]
 
 
@@ -42,7 +55,10 @@ def discover_plugins() -> dict[str, type[BaseChannel]]:
     from importlib.metadata import entry_points
 
     plugins: dict[str, type[BaseChannel]] = {}
+    allowed = _channel_allowlist()
     for ep in entry_points(group="nanobot.channels"):
+        if allowed is not None and ep.name not in allowed:
+            continue
         try:
             cls = ep.load()
             plugins[ep.name] = cls

@@ -20,12 +20,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import json
 import mimetypes
 import os
 import re
-import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -455,6 +453,43 @@ class QQChannel(BaseChannel):
             logger.warning("yage latest script execution failed: {}", e)
             return None
 
+    async def _run_wechat_signed(
+        self,
+        subscription_id: int,
+        timeout_sec: float = 45.0,
+        *,
+        force: bool = True,
+    ) -> str | None:
+        """Run wechat_push script and return raw stdout."""
+        if subscription_id <= 0:
+            return None
+        cmd = (
+            "cd /root/.nanobot/workspace/skills/wechat-rss-sidecar "
+            "&& WECHAT_RSS_BASE_URL=http://172.17.0.1:8091 "
+            f"python3 wechat_push.py --subscription-id {subscription_id}"
+        )
+        if force:
+            cmd += " --force"
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
+            if proc.returncode != 0:
+                logger.warning(
+                    "wechat signed script failed rc={} sub={} err={}",
+                    proc.returncode,
+                    subscription_id,
+                    (stderr or b"").decode("utf-8", "ignore")[:500],
+                )
+                return None
+            return (stdout or b"").decode("utf-8", "ignore")
+        except Exception as e:
+            logger.warning("wechat signed script execution failed sub={} err={}", subscription_id, e)
+            return None
+
     @staticmethod
     def _cn_num_to_int(text: str) -> int | None:
         t = (text or "").strip()
@@ -812,6 +847,60 @@ class QQChannel(BaseChannel):
         cleaned = _WECHAT_ACK_MARKER_RE.sub("", text).strip()
         return cleaned, (sub_id, entry_id)
 
+    def _extract_wechat_subscription_id(self, content: str) -> int | None:
+        """Extract wechat subscription id from internal ACK marker."""
+        text = content or ""
+        m = _WECHAT_ACK_MARKER_RE.search(text)
+        if not m:
+            return None
+        try:
+            sub_id = int(m.group(1))
+            return sub_id if sub_id > 0 else None
+        except Exception:
+            return None
+
+    def _extract_signed_digest(self, content: str) -> str | None:
+        text = (content or "").strip()
+        m = re.match(r"^NBRAW1-SHA256:([0-9a-fA-F]{64})", text)
+        if not m:
+            return None
+        return m.group(1).lower()
+
+    async def _recover_wechat_signed_by_digest(
+        self, expected_digest: str, timeout_sec: float = 45.0
+    ) -> tuple[str | None, int | None]:
+        """Best-effort recovery when ACK marker is missing but signed digest is present."""
+        if not expected_digest:
+            return None, None
+        candidate_ids: list[int] = []
+        try:
+            if os.path.exists(_WECHAT_CACHE_FILE):
+                with open(_WECHAT_CACHE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        for k in data.keys():
+                            if isinstance(k, str) and k.startswith("sub:"):
+                                try:
+                                    sid = int(k.split(":", 1)[1])
+                                    if sid > 0:
+                                        candidate_ids.append(sid)
+                                except Exception:
+                                    pass
+        except Exception:
+            pass
+        for sid in (1, 2, 3):
+            if sid not in candidate_ids:
+                candidate_ids.append(sid)
+
+        for sid in candidate_ids:
+            recovered_raw = await self._run_wechat_signed(sid, timeout_sec=timeout_sec, force=True)
+            if not recovered_raw or not recovered_raw.startswith(_SIGNED_PAYLOAD_PREFIX):
+                continue
+            got_digest = self._extract_signed_digest(recovered_raw) or ""
+            if got_digest == expected_digest:
+                return recovered_raw, sid
+        return None, None
+
     async def _ack_wechat_delivery(
         self, ack: tuple[int, int] | None, chat_id: str
     ) -> None:
@@ -915,15 +1004,49 @@ class QQChannel(BaseChannel):
                 # Cron may occasionally reconstruct signed payload incorrectly.
                 # Self-heal by fetching latest signed raw article directly and retrying once.
                 if msg.content.startswith(_SIGNED_PAYLOAD_PREFIX):
-                    recovered = await self._run_yage_signed(timeout_sec=45.0, force_latest=True)
-                    if recovered and recovered.startswith(_SIGNED_PAYLOAD_PREFIX):
-                        recovered_body = self._verify_and_unwrap_signed_payload(recovered)
-                        if recovered_body and recovered_body.strip():
-                            logger.warning(
-                                "QQ signature mismatch self-healed via fresh yage fetch chat_id={}",
-                                msg.chat_id,
-                            )
-                            safe_content = recovered_body
+                    expected_digest = self._extract_signed_digest(msg.content)
+                    # 1) WeChat signed payload recovery (preferred for wechat cron pushes)
+                    sub_id = self._extract_wechat_subscription_id(msg.content)
+                    if sub_id is not None:
+                        recovered_wechat = await self._run_wechat_signed(sub_id, timeout_sec=45.0, force=True)
+                        if recovered_wechat and recovered_wechat.startswith(_SIGNED_PAYLOAD_PREFIX):
+                            recovered_body = self._verify_and_unwrap_signed_payload(recovered_wechat)
+                            if recovered_body and recovered_body.strip():
+                                logger.warning(
+                                    "QQ signature mismatch self-healed via fresh wechat fetch chat_id={} sub={}",
+                                    msg.chat_id,
+                                    sub_id,
+                                )
+                                safe_content = recovered_body
+
+                    # 1.5) Marker may be stripped by LLM/tool-call transport.
+                    # Recover by signed digest across known subscription ids.
+                    if safe_content is None and expected_digest:
+                        recovered_wechat, recovered_sub = await self._recover_wechat_signed_by_digest(
+                            expected_digest,
+                            timeout_sec=45.0,
+                        )
+                        if recovered_wechat and recovered_wechat.startswith(_SIGNED_PAYLOAD_PREFIX):
+                            recovered_body = self._verify_and_unwrap_signed_payload(recovered_wechat)
+                            if recovered_body and recovered_body.strip():
+                                logger.warning(
+                                    "QQ signature mismatch self-healed via digest recovery chat_id={} sub={}",
+                                    msg.chat_id,
+                                    recovered_sub,
+                                )
+                                safe_content = recovered_body
+
+                    # 2) Yage signed payload recovery (legacy path)
+                    if safe_content is None:
+                        recovered = await self._run_yage_signed(timeout_sec=45.0, force_latest=True)
+                        if recovered and recovered.startswith(_SIGNED_PAYLOAD_PREFIX):
+                            recovered_body = self._verify_and_unwrap_signed_payload(recovered)
+                            if recovered_body and recovered_body.strip():
+                                logger.warning(
+                                    "QQ signature mismatch self-healed via fresh yage fetch chat_id={}",
+                                    msg.chat_id,
+                                )
+                                safe_content = recovered_body
                 if safe_content is not None and safe_content.strip():
                     pass
                 else:
