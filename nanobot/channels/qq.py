@@ -1344,6 +1344,8 @@ class QQChannel(BaseChannel):
             return "system"
         if any(k in compact for k in ("定时任务", "cron", "任务状态", "任务报错", "哪些任务在跑")):
             return "tasks"
+        if any(k in compact for k in ("今天先看什么", "先看什么")) and not any(k in compact for k in ("收件箱", "待读", "稍后看")):
+            return "decision"
         if any(k in compact for k in ("今天怎么安排", "有什么建议", "决策建议", "下一步做什么", "现在该干嘛")):
             return "decision"
         if any(k in compact for k in ("鸭哥", "微信文章", "rss文章", "今天文章", "文章有哪些", "文章更新")):
@@ -1413,7 +1415,7 @@ class QQChannel(BaseChannel):
 
         urls = [u.rstrip("。.,，、；;!！?？") for u in _GENERIC_URL_RE.findall(text)]
         if not urls:
-            if any(k in compact for k in ("待读简报", "收件箱简报", "稍后看简报", "今天先看什么")):
+            if any(k in compact for k in ("待读简报", "收件箱简报", "稍后看简报", "收件箱今天先看什么", "待读先看什么")):
                 return ["brief", "--limit", "8"]
             if any(k in compact for k in ("收件箱", "待读列表", "链接清单", "稍后看清单")):
                 return ["list", "--limit", "8"]
