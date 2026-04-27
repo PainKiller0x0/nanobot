@@ -24,8 +24,6 @@ import json
 import mimetypes
 import os
 import re
-import time
-import urllib.request
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -470,7 +468,7 @@ class QQChannel(BaseChannel):
             return None
         cmd = (
             "cd /root/.nanobot/workspace/skills/wechat-rss-sidecar "
-            "&& WECHAT_RSS_BASE_URL=http://172.17.0.1:8091 "
+            "&& WECHAT_RSS_BASE_URL=http://wechat-rss-sidecar:8091 "
             f"python3 wechat_push.py --subscription-id {subscription_id}"
         )
         if force:
@@ -752,22 +750,16 @@ class QQChannel(BaseChannel):
 
     def _verify_and_unwrap_signed_payload(self, content: str) -> str | None:
         """Verify signed payload and return body using QQ-Sidecar-RS."""
+        import urllib.request, json
         try:
-            req = urllib.request.Request(
-                "http://172.17.0.1:8092/verify",
-                data=json.dumps({"content": content}).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
+            req = urllib.request.Request("http://172.17.0.1:8092/verify", data=json.dumps({"content": content}).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                if data.get("success"):
-                    return data.get("body")
+                if data.get("success"): return data.get("body")
                 return None
         except Exception as e:
-            logger.error("QQ sidecar verify error: {}", e)
+            logger.error(f"QQ sidecar verify error: {e}")
             return None
-
     def _extract_yage_source_url(self, body: str) -> str | None:
         """Extract yage source URL from signed payload body."""
         text = (body or "").strip()
@@ -1012,10 +1004,9 @@ class QQChannel(BaseChannel):
             safe_content = msg.content
             if is_signed_payload:
                 safe_content = self._verify_and_unwrap_signed_payload(msg.content)
-            if safe_content is None:
-                # Cron may occasionally reconstruct signed payload incorrectly.
-                # Self-heal by fetching latest signed raw article directly and retrying once.
-                if msg.content.startswith(_SIGNED_PAYLOAD_PREFIX):
+                if safe_content is None:
+                    # Cron may occasionally reconstruct signed payload incorrectly.
+                    # Self-heal by fetching latest signed raw article directly and retrying once.
                     expected_digest = self._extract_signed_digest(msg.content)
                     # 1) WeChat signed payload recovery (preferred for wechat cron pushes)
                     sub_id = self._extract_wechat_subscription_id(msg.content)
@@ -1059,9 +1050,17 @@ class QQChannel(BaseChannel):
                                     msg.chat_id,
                                 )
                                 safe_content = recovered_body
-                if safe_content is not None and safe_content.strip():
-                    pass
-                else:
+                    if safe_content is not None and safe_content.strip():
+                        pass
+                    else:
+                        logger.warning("QQ outbound blocked by signature validation chat_id={}", msg.chat_id)
+                        await self._report_signature_blocked(
+                            source_chat_id=msg.chat_id,
+                            source_is_group=is_group,
+                            source_msg_id=msg_id,
+                        )
+                        return
+                elif not safe_content.strip():
                     logger.warning("QQ outbound blocked by signature validation chat_id={}", msg.chat_id)
                     await self._report_signature_blocked(
                         source_chat_id=msg.chat_id,
@@ -1325,6 +1324,83 @@ class QQChannel(BaseChannel):
             return {"file_info": result["file_info"]}
         return result
 
+
+    def _match_personal_ops_command(self, content: str) -> str | None:
+        """Map short ops questions to deterministic local dashboard commands."""
+        text = (content or "").strip().lower()
+        compact = re.sub(r"[\s，。！？!?、:：；;,.]+", "", text)
+        if not compact:
+            return None
+
+        if any(k in compact for k in ("今天有什么要看", "今天看什么", "今日摘要", "今天摘要")):
+            return "today"
+        if any(k in compact for k in ("你能做什么", "能力列表", "能力菜单", "菜单", "帮助")) and len(compact) <= 16:
+            return "menu"
+        if "内存" in compact and len(compact) <= 24:
+            return "system"
+        if any(k in compact for k in ("系统状态", "服务状态", "服务健康", "服务还活着", "健康检查", "服务器状态")):
+            return "system"
+        if any(k in compact for k in ("定时任务", "cron", "任务状态", "任务报错", "哪些任务在跑")):
+            return "tasks"
+        if any(k in compact for k in ("鸭哥", "微信文章", "rss文章", "今天文章", "文章有哪些", "文章更新")):
+            return "articles"
+        if any(k in compact for k in ("lof", "qdii", "基金溢价", "溢价机会", "套利机会")):
+            return "lof"
+        return None
+
+    async def _run_personal_ops_command(self, command: str) -> str:
+        """Run the personal ops script without involving the LLM."""
+        script = Path("/root/.nanobot/workspace/skills/personal-ops-assistant/ops_summary.py")
+        if not script.exists():
+            return "运维助手脚本不存在，暂时无法查询。"
+
+        proc = await asyncio.create_subprocess_exec(
+            "python3",
+            str(script),
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            return "运维查询超时了，稍后再试一下。"
+
+        out = stdout.decode("utf-8", errors="replace").strip()
+        err = stderr.decode("utf-8", errors="replace").strip()
+        if proc.returncode != 0:
+            detail = err or out or f"exit {proc.returncode}"
+            return f"运维查询失败：{detail[:500]}"
+        return out or "运维查询完成，但没有输出。"
+
+    async def _try_handle_personal_ops_query(
+        self,
+        *,
+        chat_id: str,
+        is_group: bool,
+        message_id: str,
+        content: str,
+    ) -> bool:
+        command = self._match_personal_ops_command(content)
+        if not command:
+            return False
+
+        reply = await self._run_personal_ops_command(command)
+        max_len = max(200, int(getattr(self.config, "text_chunk_max_len", 1200) or 1200))
+        for chunk in split_message(reply, max_len):
+            if chunk.strip():
+                await self._send_text_only(
+                    chat_id=chat_id,
+                    is_group=is_group,
+                    msg_id=message_id,
+                    content=chunk,
+                )
+        logger.info("QQ personal ops fast path handled command={} message_id={}", command, message_id)
+        return True
+
+
     # ---------------------------
     # Inbound (receive)
     # ---------------------------
@@ -1368,6 +1444,15 @@ class QQChannel(BaseChannel):
         # the data used by tests don't contain attachments property
         # so we use getattr with a default of [] to avoid AttributeError in tests
         attachments = getattr(data, "attachments", None) or []
+        if content and not attachments:
+            if await self._try_handle_personal_ops_query(
+                chat_id=chat_id,
+                is_group=is_group,
+                message_id=data.id,
+                content=content,
+            ):
+                return
+
         media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
 
         # Compose content that always contains actionable saved paths
@@ -1453,6 +1538,10 @@ class QQChannel(BaseChannel):
         filename_hint: str = "",
     ) -> str | None:
         """Download an inbound attachment using QQ-Sidecar-RS."""
+        import time
+        from urllib.parse import urlparse
+        from pathlib import Path
+        
         ts = int(time.time() * 1000)
         safe = _sanitize_filename(filename_hint)
         ext = Path(urlparse(url).path).suffix
@@ -1480,7 +1569,7 @@ class QQChannel(BaseChannel):
 
         try:
             async with self._http.post(
-                "http://150.158.121.88:8092/download",
+                "http://172.17.0.1:8092/download",
                 json={
                     "url": url,
                     "target_path": str(target),
