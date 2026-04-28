@@ -7,99 +7,45 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, quote
-from urllib.request import Request, urlopen
+from urllib.parse import quote, urlencode
+
+_SHARED_DIR = Path(__file__).resolve().parents[1] / "_shared"
+if _SHARED_DIR.exists():
+    sys.path.insert(0, str(_SHARED_DIR))
+
+from ops_common import JsonHttpClient, fmt_time as common_fmt_time, now_shanghai, parse_dt, short
 
 
-BASE_URL_CANDIDATES = [
-    os.environ.get("TREND_SIDECAR_URL", "").strip(),
-    "http://127.0.0.1:8095",
-    "http://127.0.0.1:8093/trends",
-    "http://172.17.0.1:8093/trends",
-]
-TIMEOUT_SECS = 10
-SHANGHAI = timezone(timedelta(hours=8))
+HTTP = JsonHttpClient(
+    [
+        os.environ.get("TREND_SIDECAR_URL", "").strip(),
+        "http://127.0.0.1:8095",
+        "http://127.0.0.1:8093/trends",
+        "http://172.17.0.1:8093/trends",
+    ],
+    timeout=10,
+    post_timeout=25,
+)
+fetch_json = HTTP.get_json
+post_json = HTTP.post_json
 
 
-def candidate_urls(path: str) -> list[str]:
-    if path.startswith("http"):
-        return [path]
-    return [base.rstrip("/") + path for base in BASE_URL_CANDIDATES if base]
+def fmt_time(value):
+    return common_fmt_time(value, "%m-%d %H:%M")
 
 
-def fetch_json(path: str) -> Any:
-    last_exc: Exception | None = None
-    for url in candidate_urls(path):
-        req = Request(url, headers={"Accept": "application/json"})
-        try:
-            with urlopen(req, timeout=TIMEOUT_SECS) as resp:
-                return json.loads(resp.read().decode("utf-8", errors="replace"))
-        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            last_exc = exc
-            continue
-    raise RuntimeError(f"请求失败：{path} - {last_exc}") from last_exc
-
-
-def post_json(path: str, payload: dict[str, Any] | None = None) -> Any:
-    body = json.dumps(payload or {}).encode("utf-8")
-    last_exc: Exception | None = None
-    for url in candidate_urls(path):
-        req = Request(
-            url,
-            data=body,
-            method="POST",
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-        )
-        try:
-            with urlopen(req, timeout=max(TIMEOUT_SECS, 25)) as resp:
-                return json.loads(resp.read().decode("utf-8", errors="replace"))
-        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            last_exc = exc
-            continue
-    raise RuntimeError(f"触发失败：{path} - {last_exc}") from last_exc
-
-
-def parse_dt(value: Any) -> datetime | None:
-    if not value:
-        return None
-    text = str(value).strip()
-    candidates = [text]
-    if text.endswith("Z"):
-        candidates.append(text[:-1] + "+00:00")
-    for candidate in candidates:
-        try:
-            dt = datetime.fromisoformat(candidate)
-        except ValueError:
-            continue
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(SHANGHAI)
-    return None
-
-
-def fmt_time(value: Any) -> str:
-    dt = parse_dt(value)
-    return dt.strftime("%m-%d %H:%M") if dt else "-"
-
-
-def age_note(value: Any) -> str:
+def age_note(value):
     dt = parse_dt(value)
     if not dt:
         return "更新时间未知"
-    minutes = int((datetime.now(SHANGHAI) - dt).total_seconds() // 60)
+    minutes = int((now_shanghai() - dt).total_seconds() // 60)
     if minutes < 0:
         minutes = 0
     if minutes >= 60:
         return f"更新：{fmt_time(value)}，约 {minutes // 60} 小时前"
     return f"更新：{fmt_time(value)}，约 {minutes} 分钟前"
-
-
-def short(text: Any, limit: int = 54) -> str:
-    s = str(text or "").strip().replace("\n", " ")
-    return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
 def item_line(item: dict[str, Any], idx: int | None = None) -> str:

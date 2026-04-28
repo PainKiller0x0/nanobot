@@ -4,111 +4,34 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+
+_SHARED_DIR = Path(__file__).resolve().parents[1] / "_shared"
+if _SHARED_DIR.exists():
+    sys.path.insert(0, str(_SHARED_DIR))
+
+from ops_common import JsonHttpClient, SHANGHAI, fmt_time, now_shanghai, parse_dt, short
 
 
-BASE_URL_CANDIDATES = [
-    os.environ.get("NANOBOT_DASHBOARD_URL", "").strip(),
-    "http://127.0.0.1:8093",
-    "http://172.17.0.1:8093",
-]
-TIMEOUT_SECS = 8
-SHANGHAI = timezone(timedelta(hours=8))
-
-
-def now_shanghai() -> datetime:
-    return datetime.now(SHANGHAI)
-
-
-def candidate_urls(path: str) -> list[str]:
-    if path.startswith("http"):
-        return [path]
-    return [base.rstrip("/") + path for base in BASE_URL_CANDIDATES if base]
-
-
-def fetch_json(path: str, default: Any = None) -> Any:
-    last_exc: Exception | None = None
-    for url in candidate_urls(path):
-        req = Request(url, headers={"Accept": "application/json"})
-        try:
-            with urlopen(req, timeout=TIMEOUT_SECS) as resp:
-                raw = resp.read()
-            return json.loads(raw.decode("utf-8", errors="replace"))
-        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            last_exc = exc
-            continue
-    if default is not None:
-        return default
-    raise RuntimeError(f"请求失败：{path} - {last_exc}") from last_exc
-
-
-def post_json(path: str, payload: dict[str, Any]) -> Any:
-    body = json.dumps(payload).encode("utf-8")
-    last_exc: Exception | None = None
-    for url in candidate_urls(path):
-        req = Request(
-            url,
-            data=body,
-            method="POST",
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-        )
-        try:
-            with urlopen(req, timeout=TIMEOUT_SECS) as resp:
-                raw = resp.read()
-            try:
-                return json.loads(raw.decode("utf-8", errors="replace"))
-            except json.JSONDecodeError:
-                return {"ok": True, "raw": raw.decode("utf-8", errors="replace")}
-        except (HTTPError, URLError, TimeoutError, OSError) as exc:
-            last_exc = exc
-            continue
-    raise RuntimeError(f"触发失败：{path} - {last_exc}") from last_exc
-
-
-def parse_dt(value: Any) -> datetime | None:
-    if not value:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    candidates = [text]
-    if text.endswith("Z"):
-        candidates.append(text[:-1] + "+00:00")
-    if " +08:00" in text and "T" not in text:
-        candidates.append(text.replace(" +08:00", "+08:00").replace(" ", "T", 1))
-    for candidate in candidates:
-        try:
-            dt = datetime.fromisoformat(candidate)
-        except ValueError:
-            continue
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=SHANGHAI)
-        return dt.astimezone(SHANGHAI)
-    return None
+HTTP = JsonHttpClient(
+    [
+        os.environ.get("NANOBOT_DASHBOARD_URL", "").strip(),
+        "http://127.0.0.1:8093",
+        "http://172.17.0.1:8093",
+    ],
+    timeout=8,
+)
+fetch_json = HTTP.get_json
+post_json = HTTP.post_json
 
 
 def is_today(value: Any) -> bool:
     dt = parse_dt(value)
     return bool(dt and dt.date() == now_shanghai().date())
-
-
-def fmt_time(value: Any) -> str:
-    dt = parse_dt(value)
-    if not dt:
-        return "-"
-    return dt.strftime("%H:%M")
-
-
-def short(text: Any, limit: int = 52) -> str:
-    s = str(text or "").strip().replace("\n", " ")
-    return s if len(s) <= limit else s[: limit - 1] + "…"
-
 
 def num(value: Any) -> float | None:
     try:

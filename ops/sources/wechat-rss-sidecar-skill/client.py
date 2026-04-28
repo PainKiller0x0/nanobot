@@ -7,40 +7,30 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 import urllib.parse
-import urllib.request
 
-BASE_URL_CANDIDATES = [
-    os.environ.get('WECHAT_RSS_BASE_URL', '').strip(),
-    # Host-side scripts should be fast; container-side scripts can use Podman DNS.
-    'http://127.0.0.1:8091',
-    'http://wechat-rss-sidecar:8091',
-]
+_SHARED_DIR = Path(__file__).resolve().parents[1] / "_shared"
+if _SHARED_DIR.exists():
+    sys.path.insert(0, str(_SHARED_DIR))
+
+from ops_common import JsonHttpClient
+
+
+HTTP = JsonHttpClient(
+    [
+        os.environ.get('WECHAT_RSS_BASE_URL', '').strip(),
+        # Host-side scripts should be fast; container-side scripts can use Podman DNS.
+        'http://127.0.0.1:8091',
+        'http://wechat-rss-sidecar:8091',
+    ],
+    timeout=120,
+    post_timeout=120,
+)
 
 
 def request(path: str, method: str = 'GET', payload: dict | None = None, expect_json: bool = True):
-    data = None
-    headers = {}
-    if payload is not None:
-        data = json.dumps(payload).encode('utf-8')
-        headers['Content-Type'] = 'application/json'
-
-    last_error: Exception | None = None
-    for base_url in BASE_URL_CANDIDATES:
-        if not base_url:
-            continue
-        req = urllib.request.Request(base_url + path, data=data, method=method, headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                body = resp.read().decode('utf-8')
-                return json.loads(body) if expect_json else body
-        except Exception as exc:
-            last_error = exc
-            continue
-
-    if last_error is not None:
-        raise last_error
-    raise RuntimeError('No sidecar base URL configured')
+    return HTTP.request(path, method=method, payload=payload, expect_json=expect_json)
 
 
 def request_json(path: str, method: str = 'GET', payload: dict | None = None) -> dict:

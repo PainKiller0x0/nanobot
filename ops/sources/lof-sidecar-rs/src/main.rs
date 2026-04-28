@@ -591,128 +591,44 @@ async fn api_sidecars(State(state): State<AppState>) -> impl IntoResponse {
     Json(sidecar_manager_snapshot(&state).await)
 }
 
-async fn proxy_rss_root(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    reverse_proxy(
-        state,
-        "http://127.0.0.1:8091",
-        "/rss",
-        "",
-        method,
-        uri,
-        headers,
-        body,
-    )
-    .await
+macro_rules! proxy_pair {
+    ($root_fn:ident, $path_fn:ident, $upstream:literal, $prefix:literal) => {
+        async fn $root_fn(
+            State(state): State<AppState>,
+            method: Method,
+            uri: Uri,
+            headers: HeaderMap,
+            body: Bytes,
+        ) -> Response {
+            reverse_proxy(state, $upstream, $prefix, "", method, uri, headers, body).await
+        }
+
+        async fn $path_fn(
+            State(state): State<AppState>,
+            AxumPath(path): AxumPath<String>,
+            method: Method,
+            uri: Uri,
+            headers: HeaderMap,
+            body: Bytes,
+        ) -> Response {
+            reverse_proxy(state, $upstream, $prefix, &path, method, uri, headers, body).await
+        }
+    };
 }
 
-async fn proxy_rss_path(
-    State(state): State<AppState>,
-    AxumPath(path): AxumPath<String>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    reverse_proxy(
-        state,
-        "http://127.0.0.1:8091",
-        "/rss",
-        &path,
-        method,
-        uri,
-        headers,
-        body,
-    )
-    .await
-}
-
-async fn proxy_reflexio_root(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    reverse_proxy(
-        state,
-        "http://127.0.0.1:8081",
-        "/reflexio",
-        "",
-        method,
-        uri,
-        headers,
-        body,
-    )
-    .await
-}
-
-async fn proxy_reflexio_path(
-    State(state): State<AppState>,
-    AxumPath(path): AxumPath<String>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    reverse_proxy(
-        state,
-        "http://127.0.0.1:8081",
-        "/reflexio",
-        &path,
-        method,
-        uri,
-        headers,
-        body,
-    )
-    .await
-}
-
-async fn proxy_trends_root(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    reverse_proxy(
-        state,
-        "http://127.0.0.1:8095",
-        "/trends",
-        "",
-        method,
-        uri,
-        headers,
-        body,
-    )
-    .await
-}
-
-async fn proxy_trends_path(
-    State(state): State<AppState>,
-    AxumPath(path): AxumPath<String>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    reverse_proxy(
-        state,
-        "http://127.0.0.1:8095",
-        "/trends",
-        &path,
-        method,
-        uri,
-        headers,
-        body,
-    )
-    .await
-}
+proxy_pair!(proxy_rss_root, proxy_rss_path, "http://127.0.0.1:8091", "/rss");
+proxy_pair!(
+    proxy_reflexio_root,
+    proxy_reflexio_path,
+    "http://127.0.0.1:8081",
+    "/reflexio"
+);
+proxy_pair!(
+    proxy_trends_root,
+    proxy_trends_path,
+    "http://127.0.0.1:8095",
+    "/trends"
+);
 
 async fn proxy_obp_root(
     State(state): State<AppState>,
