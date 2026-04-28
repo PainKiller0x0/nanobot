@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reflexio-RS</title>
+<style>
+:root{--bg:#fafaf7;--card:#fff;--border:rgba(0,0,0,.1);--text:#1a1a1a;--muted:#888;--accent:#0066cc;--radius:8px;--shadow:0 1px 3px rgba(0,0,0,.08);--th-bg:#f8f8f5;--hover-bg:#f8f8f5;--pre-bg:#f5f5f2;--btn-hover:#f0f0ed}
+[data-theme="dark"]{--bg:#0a0a0a;--card:#1a1a1a;--border:rgba(255,255,255,.12);--text:rgba(232,232,228,.92);--muted:rgba(232,232,228,.5);--accent:#6db3f2;--shadow:0 1px 3px rgba(0,0,0,.3);--th-bg:#222;--hover-bg:#222;--pre-bg:#1e1e1e;--btn-hover:#2a2a2a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.6;transition:background .2s,color .2s}
+.header{background:var(--card);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10}
+.header h1{font-size:20px;font-weight:600}
+.header .tag{font-size:11px;background:var(--accent);color:#fff;padding:2px 8px;border-radius:10px}
+.header .version{font-size:12px;color:var(--muted)}
+.header-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.icon-btn{width:32px;height:32px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;transition:all .15s}
+.icon-btn:hover{background:var(--hover-bg)}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--card);padding:0 24px}
+.tab{padding:10px 20px;cursor:pointer;border-bottom:2px solid transparent;font-size:14px;color:var(--muted);transition:all .15s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:500}
+.content{max-width:1200px;margin:0 auto;padding:24px}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;text-align:center;box-shadow:var(--shadow)}
+.stat-card .value{font-size:32px;font-weight:700;color:var(--accent)}
+.stat-card .label{font-size:13px;color:var(--muted);margin-top:4px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border)}
+th{background:var(--th-bg);font-weight:600;color:var(--muted);font-size:12px;letter-spacing:.5px}
+tr:hover td{background:var(--hover-bg)}
+.empty{text-align:center;padding:40px;color:var(--muted)}
+.btn{display:inline-block;padding:6px 14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;background:var(--card);color:var(--text);transition:all .15s}
+.btn:hover{background:var(--btn-hover)}
+pre{background:var(--pre-bg);color:var(--text);padding:12px;border-radius:6px;font-size:13px;overflow-x:auto;max-height:400px;border:1px solid var(--border);white-space:pre-wrap;word-break:break-word}
+.hidden{display:none}
+td.content-cell{max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="header">
+<h1>Reflexio-RS</h1>
+<span class="tag">Rust</span>
+<span class="version" id="version"></span>
+<div class="header-actions">
+<button class="icon-btn" id="lang-btn" title="Switch Language / 切换语言">EN</button>
+<button class="icon-btn" id="theme-btn" title="Toggle Dark Mode / 切换暗色模式">&#9790;</button>
+</div>
+</div>
+<div class="tabs">
+<div class="tab active" data-tab="dashboard">Dashboard / 仪表盘</div>
+<div class="tab" data-tab="interactions">Interactions / 交互记录</div>
+<div class="tab" data-tab="facts">Facts / 提取事实</div>
+</div>
+<div class="content">
+<div id="tab-dashboard"><div class="stats-grid" id="stats-grid"></div></div>
+<div id="tab-interactions" class="hidden">
+<div style="margin-bottom:12px"><button class="btn" onclick="loadInteractions()">Refresh / 刷新</button></div>
+<div id="interactions-list"></div>
+</div>
+<div id="tab-facts" class="hidden">
+<div style="margin-bottom:12px"><button class="btn" onclick="loadFacts()">Refresh / 刷新</button></div>
+<div id="facts-list"></div>
+</div>
+</div>
+<script>
+const LANG={en:{stats:['Interactions','Extracted Facts'],empty_int:'No interactions',empty_facts:'No facts extracted yet',loading:'Loading...',error:'Error',th_id:'ID',th_user:'User',th_content:'Content',th_created:'Created (UTC+8)',refresh:'Refresh'},zh:{stats:['交互记录','提取事实'],empty_int:'暂无交互记录',empty_facts:'暂无提取事实',loading:'加载中...',error:'出错',th_id:'ID',th_user:'用户',th_content:'内容',th_created:'创建时间(UTC+8)',refresh:'刷新'}};
+let lang=localStorage.getItem('reflexio-rs-lang')||'en';
+let theme=localStorage.getItem('reflexio-rs-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+function t(k){return LANG[lang][k]||k}
+function applyTheme(){document.documentElement.setAttribute('data-theme',theme);document.getElementById('theme-btn').innerHTML=theme==='dark'?'&#9788;':'&#9790;';localStorage.setItem('reflexio-rs-theme',theme)}
+function applyLang(){document.getElementById('lang-btn').textContent=lang==='en'?'EN':'中';const a=document.querySelector('.tab.active');if(a)loadTab(a.dataset.tab)}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+async function api(p){const r=await fetch(p);return r.json()}
+function byId(id){return document.getElementById(id)}
+async function init(){try{const v=await api('/health');byId('version').textContent='v'+v.version}catch(e){}applyTheme();applyLang();loadDashboard()}
+async function loadDashboard(){try{const s=await api('/api/stats');const l=t('stats');byId('stats-grid').innerHTML=[{v:s.total_interactions,l:l[0]},{v:s.total_facts,l:l[1]}].map(x=>'<div class="stat-card"><div class="value">'+x.v+'</div><div class="label">'+x.l+'</div></div>').join('')}catch(e){console.error(e)}}
+async function loadInteractions(){const el=byId('interactions-list');el.innerHTML='<div class="empty">'+t('loading')+'</div>';try{const d=await api('/api/interactions');if(!d.length){el.innerHTML='<div class="empty">'+t('empty_int')+'</div>';return}el.innerHTML='<table><thead><tr><th>'+t('th_id')+'</th><th>'+t('th_user')+'</th><th>'+t('th_content')+'</th><th>'+t('th_created')+'</th></tr></thead><tbody>'+d.map(i=>'<tr><td>'+i.id+'</td><td>'+esc(i.user_id)+'</td><td class="content-cell" title="'+esc(i.content)+'">'+esc(i.content.substring(0,120))+'</td><td>'+esc(i.created_at)+'</td></tr>').join('')+'</tbody></table>'}catch(e){el.innerHTML='<div class="empty">'+t('error')+': '+e.message+'</div>'}}
+async function loadFacts(){const el=byId('facts-list');el.innerHTML='<div class="empty">'+t('loading')+'</div>';try{const d=await api('/api/facts');if(!d.length){el.innerHTML='<div class="empty">'+t('empty_facts')+'</div>';return}el.innerHTML='<table><thead><tr><th>'+t('th_id')+'</th><th>'+t('th_content')+'</th><th>'+t('th_created')+'</th></tr></thead><tbody>'+d.map(f=>'<tr><td>'+f.id+'</td><td><pre style="margin:0;max-height:120px">'+esc(f.content)+'</pre></td><td>'+esc(f.created_at)+'</td></tr>').join('')+'</tbody></table>'}catch(e){el.innerHTML='<div class="empty">'+t('error')+': '+e.message+'</div>'}}
+function loadTab(tab){byId('tab-'+tab).classList.remove('hidden');if(tab==='dashboard')loadDashboard();if(tab==='interactions')loadInteractions();if(tab==='facts')loadFacts()}
+document.querySelectorAll('.tab').forEach(tb=>{tb.addEventListener('click',function(){document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('[id^=tab-]').forEach(x=>x.classList.add('hidden'));this.classList.add('active');loadTab(this.dataset.tab)})});
+byId('theme-btn').addEventListener('click',function(){theme=theme==='dark'?'light':'dark';applyTheme()});
+byId('lang-btn').addEventListener('click',function(){lang=lang==='en'?'zh':'en';localStorage.setItem('reflexio-rs-lang',lang);applyLang()});
+init();
+</script>
+</body>
+</html>

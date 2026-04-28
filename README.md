@@ -118,6 +118,26 @@ cat ~/.nanobot/extensions.lock
 
 更多说明见 [docs/EXTENSIONS_GLUE.md](docs/EXTENSIONS_GLUE.md)。
 
+### Ops / Sidecars 快照
+
+`ops/` 保存当前线上可复现的运维胶水：Rust sidecar 源码、systemd unit、部署脚本、服务矩阵配置和 Nanobot skill 快照。
+
+它的用途是“让这台服务器能重新拼起来”，不是保存线上状态：
+
+- 提交源码、脚本、unit、example 配置。
+- 不提交 `target/`、日志、数据库、真实 cron 目标 ID、token、env。
+- 真实配置仍然放在 `/root/.nanobot` 或服务器本地 `/root/nanobot-ops`。
+
+常用命令：
+
+```bash
+ops/scripts/deploy-sidecar.sh --status all
+ops/scripts/deploy-sidecar.sh trend
+ops/bin/sidecarctl status
+```
+
+当前 sidecar 入口统一经 `http://<host>:8093/` 反代，包括 `/rss/`、`/reflexio/`、`/obp/`、`/trends/`。
+
 ### Runtime / 线上脚本
 
 常用脚本：
@@ -231,6 +251,20 @@ Run smoke tests:
 
 ```bash
 scripts/run_smoke.sh
+```
+
+### Ops / Sidecar Snapshot
+
+The `ops/` directory tracks reproducible live-server glue: Rust sidecar sources, systemd units, deployment scripts, sidecar registry and Nanobot skill snapshots.
+
+It intentionally excludes runtime state: build targets, logs, databases, real cron target IDs, tokens and env files.
+
+Typical commands:
+
+```bash
+ops/scripts/deploy-sidecar.sh --status all
+ops/scripts/deploy-sidecar.sh trend
+ops/bin/sidecarctl status
 ```
 
 ### Extension install

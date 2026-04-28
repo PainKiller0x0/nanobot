@@ -1,0 +1,18 @@
+[Unit]
+Description=Notify Sidecar Rust cron bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/.nanobot/workspace/skills/notify-sidecar-rs
+Environment=NOTIFY_SIDECAR_HOST=127.0.0.1
+Environment=NOTIFY_SIDECAR_PORT=8094
+Environment=NOTIFY_SIDECAR_CONFIG=/root/.nanobot/workspace/skills/notify-sidecar-rs/config.json
+EnvironmentFile=/root/.nanobot/secrets/nanobot.env
+ExecStart=/usr/local/bin/notify-sidecar-rs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

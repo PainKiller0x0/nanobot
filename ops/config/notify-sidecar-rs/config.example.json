@@ -1,0 +1,28 @@
+{
+  "nanobot_config_path": "/root/.nanobot/config.json",
+  "verify_url": "http://172.17.0.1:8092/verify",
+  "state_file": "/root/.nanobot/workspace/skills/notify-sidecar-rs/data/state.json",
+  "text_chunk_max_len": 1200,
+  "target_kind": "c2c",
+  "target_id": "REPLACE_WITH_QQ_OPENID_OR_GROUP_ID",
+  "jobs": [
+    {
+      "id": "example-health",
+      "name": "Example health check",
+      "enabled": true,
+      "schedule": "0 9 * * *",
+      "timezone": "Asia/Shanghai",
+      "command": "printf 'Nanobot notify-sidecar example OK\\n'",
+      "timeout_secs": 30
+    },
+    {
+      "id": "example-lof-report",
+      "name": "Example LOF report",
+      "enabled": false,
+      "schedule": "45 9 * * 1-5",
+      "timezone": "Asia/Shanghai",
+      "command": "python3 /root/.nanobot/workspace/skills/qdii-monitor/send_qq.py 早市",
+      "timeout_secs": 180
+    }
+  ]
+}

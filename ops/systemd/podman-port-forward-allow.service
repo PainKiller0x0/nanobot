@@ -1,0 +1,13 @@
+[Unit]
+Description=Guard Nanobot public sidecar ports
+After=network-online.target
+Wants=network-online.target
+Before=podman-nanobot-cage.service podman-wechat-rss-sidecar.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/podman-port-forward-allow.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

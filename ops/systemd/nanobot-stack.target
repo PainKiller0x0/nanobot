@@ -1,0 +1,7 @@
+[Unit]
+Description=Nanobot stack (core + sidecars)
+Wants=network-online.target podman-port-forward-allow.service podman-wechat-rss-sidecar.service qq-sidecar-rs.service nanobot-reflexio-rs.service obp-rs.service lof-sidecar.service notify-sidecar-rs.service podman-nanobot-cage.service
+After=network-online.target podman-port-forward-allow.service podman-wechat-rss-sidecar.service qq-sidecar-rs.service nanobot-reflexio-rs.service obp-rs.service lof-sidecar.service notify-sidecar-rs.service
+
+[Install]
+WantedBy=multi-user.target

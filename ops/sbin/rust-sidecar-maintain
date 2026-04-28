@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+entries=(
+  'lof-sidecar-rs|/root/.nanobot/workspace/skills/qdii-monitor/lof-sidecar-rs|lof-sidecar-rs|lof-sidecar.service'
+  'notify-sidecar-rs|/root/.nanobot/workspace/skills/notify-sidecar-rs|notify-sidecar-rs|notify-sidecar-rs.service'
+  'qq-sidecar-rs|/root/qq-sidecar-rs|qq-sidecar-rs|qq-sidecar-rs.service'
+  'nanobot-reflexio-rs|/root/nanobot-reflexio-rs|nanobot-reflexio-rs|nanobot-reflexio-rs.service'
+  'obp-rs|/root/obp-rs|obp-rs|obp-rs.service'
+)
+
+for_entry() {
+  local fn=$1
+  for row in "${entries[@]}"; do
+    IFS='|' read -r name dir bin unit <<< "$row"
+    "$fn" "$name" "$dir" "$bin" "$unit"
+  done
+}
+
+install_existing_one() {
+  local name=$1 dir=$2 bin=$3 unit=$4
+  local src="$dir/target/release/$bin"
+  if [[ ! -x "$src" ]]; then
+    echo "missing release binary: $src" >&2
+    return 1
+  fi
+  install -m 0755 -D "$src" "/usr/local/bin/$bin"
+  echo "installed $name -> /usr/local/bin/$bin"
+}
+
+build_install_one() {
+  local name=$1 dir=$2 bin=$3 unit=$4
+  echo "building $name"
+  (cd "$dir" && cargo build --release)
+  install_existing_one "$name" "$dir" "$bin" "$unit"
+}
+
+status_one() {
+  local name=$1 dir=$2 bin=$3 unit=$4
+  local exec status size target_size
+  exec=$(systemctl show -p ExecStart --value "$unit" 2>/dev/null || true)
+  status=$(systemctl is-active "$unit" 2>/dev/null || true)
+  size=$(du -h "/usr/local/bin/$bin" 2>/dev/null | awk '{print $1}' || true)
+  target_size=$(du -sh "$dir/target" 2>/dev/null | awk '{print $1}' || echo '-')
+  printf '%-22s %-8s bin=%-6s target=%-6s exec=%s\n' "$name" "$status" "${size:-?}" "$target_size" "$exec"
+}
+
+ensure_exec_from_usr_local_one() {
+  local name=$1 dir=$2 bin=$3 unit=$4
+  local exec
+  exec=$(systemctl show -p ExecStart --value "$unit" 2>/dev/null || true)
+  if [[ "$exec" != *"/usr/local/bin/$bin"* ]]; then
+    echo "refuse to clean $name: $unit is not using /usr/local/bin/$bin" >&2
+    echo "$exec" >&2
+    return 1
+  fi
+}
+
+clean_target_one() {
+  local name=$1 dir=$2 bin=$3 unit=$4
+  local target="$dir/target"
+  case "$target" in
+    /root/*/target|/root/.nanobot/*/target) ;;
+    *) echo "refuse unsafe target path: $target" >&2; return 1 ;;
+  esac
+  if [[ -d "$target" ]]; then
+    echo "removing $target"
+    rm -rf --one-file-system "$target"
+  else
+    echo "already clean: $target"
+  fi
+}
+
+restart_one() {
+  local name=$1 dir=$2 bin=$3 unit=$4
+  systemctl restart "$unit"
+}
+
+case "${1:-status}" in
+  status)
+    for_entry status_one
+    ;;
+  install-existing)
+    for_entry install_existing_one
+    systemctl daemon-reload
+    ;;
+  build-install)
+    for_entry build_install_one
+    systemctl daemon-reload
+    ;;
+  clean-targets)
+    for_entry ensure_exec_from_usr_local_one
+    for_entry clean_target_one
+    ;;
+  restart)
+    for_entry restart_one
+    sleep 2
+    for_entry status_one
+    ;;
+  *)
+    echo "usage: $0 {status|install-existing|build-install|clean-targets|restart}" >&2
+    exit 2
+    ;;
+esac

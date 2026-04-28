@@ -100,3 +100,13 @@ temp/
 
 # Runtime backup artifacts
 *.bak_pre_override
+
+# Runtime operations snapshots
+ops/sources/*/target/
+ops/**/__pycache__/
+ops/**/*.pyc
+ops/**/*.pyo
+ops/**/*.db
+ops/**/*.sqlite
+ops/**/*.log
+ops/config/notify-sidecar-rs/config.json

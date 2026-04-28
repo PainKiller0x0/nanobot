@@ -1,0 +1,38 @@
+[Unit]
+Description=WeChat RSS Sidecar container (Podman)
+Documentation=man:podman-generate-systemd(1)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=%t/containers
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+Type=notify
+NotifyAccess=all
+Restart=always
+RestartSec=5
+TimeoutStopSec=70
+
+ExecStartPre=/usr/bin/podman network exists nanobot-net
+ExecStartPre=/bin/rm -f %t/%n.ctr-id
+ExecStartPre=-/usr/bin/podman rm -f wechat-rss-sidecar
+ExecStart=/usr/bin/podman run \
+  --cidfile=%t/%n.ctr-id \
+  --cgroups=no-conmon \
+  --rm \
+  --sdnotify=conmon \
+  -d \
+  --name wechat-rss-sidecar \
+  --replace \
+  --network nanobot-net \
+  -p 127.0.0.1:8091:8091 \
+  -e WECHAT_RSS_BASE_DIR=/root/.nanobot/workspace/wechat_rss_service \
+  -e WECHAT_RSS_DB=/root/.nanobot/workspace/wechat_rss_service/service.db \
+  -e WECHAT_RSS_SETTINGS=/root/.nanobot/workspace/wechat_rss_service/settings.json \
+  -v /root/.nanobot/workspace/wechat_rss_service:/root/.nanobot/workspace/wechat_rss_service:rw \
+  localhost/wechat-rss-rs:local
+ExecStop=/usr/bin/podman stop --ignore -t 20 --cidfile=%t/%n.ctr-id
+ExecStopPost=/usr/bin/podman rm -f --ignore -t 10 --cidfile=%t/%n.ctr-id
+
+[Install]
+WantedBy=multi-user.target

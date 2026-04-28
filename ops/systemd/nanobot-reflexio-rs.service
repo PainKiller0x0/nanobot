@@ -1,0 +1,17 @@
+[Unit]
+Description=Nanobot Reflexio Rust Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/nanobot-reflexio-rs
+Environment=REFLEXIO_HOST=127.0.0.1
+Environment=REFLEXIO_PORT=8081
+ExecStart=/usr/local/bin/nanobot-reflexio-rs
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

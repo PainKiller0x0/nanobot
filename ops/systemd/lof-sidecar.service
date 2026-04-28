@@ -1,0 +1,18 @@
+[Unit]
+Description=LOF Sidecar Rust Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/.nanobot/workspace/skills/qdii-monitor/lof-sidecar-rs
+Environment=LOF_SIDECAR_PORT=8093
+Environment=LOF_SIDECAR_TIMEOUT_SECS=240
+Environment=LOF_SCRIPT_DIR=/root/.nanobot/workspace/skills/qdii-monitor
+Environment=LOF_SIDECAR_STATE_FILE=/root/.nanobot/workspace/skills/qdii-monitor/lof-sidecar-rs/data/state.json
+ExecStart=/usr/local/bin/lof-sidecar-rs
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
