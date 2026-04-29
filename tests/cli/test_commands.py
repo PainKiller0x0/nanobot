@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import _make_provider, app
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, HeartbeatConfig
 from nanobot.cron.types import CronJob, CronPayload
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -763,6 +763,16 @@ def test_heartbeat_retains_recent_messages_by_default():
     config = Config()
 
     assert config.gateway.heartbeat.keep_recent_messages == 8
+
+
+def test_heartbeat_delivery_target_config_aliases():
+    config = HeartbeatConfig.model_validate({
+        "deliveryChannel": "qq",
+        "deliveryChatId": "chat-1",
+    })
+
+    assert config.delivery_channel == "qq"
+    assert config.delivery_chat_id == "chat-1"
 
 
 def _write_instance_config(tmp_path: Path) -> Path:
