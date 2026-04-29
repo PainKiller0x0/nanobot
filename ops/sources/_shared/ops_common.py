@@ -50,7 +50,7 @@ def fmt_time(value: Any, pattern: str = "%H:%M", default: str = "-") -> str:
 
 
 class JsonHttpClient:
-    def __init__(self, base_urls: list[str], timeout: int = 8, post_timeout: int | None = None):
+    def __init__(self, base_urls: list[str], timeout: float = 8, post_timeout: float | None = None):
         self.base_urls = [base.rstrip("/") for base in base_urls if base]
         self.timeout = timeout
         self.post_timeout = post_timeout or timeout

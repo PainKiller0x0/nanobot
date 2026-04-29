@@ -5,7 +5,7 @@ import json
 import os
 import re
 import socket
-import urllib.request
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -25,6 +25,14 @@ SIDECAR_LABELS = [
 ]
 ERROR_PATTERNS = re.compile(r'(Traceback|ERROR|Exception|tool call failed|500|503|timed out|timeout|failed)', re.I)
 WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+_SHARED_DIR = Path(__file__).resolve().parents[1] / "_shared"
+if _SHARED_DIR.exists():
+    sys.path.insert(0, str(_SHARED_DIR))
+
+from ops_common import JsonHttpClient
+
+HTTP = JsonHttpClient([], timeout=2)
 
 
 def now_cn() -> datetime:
@@ -50,21 +58,6 @@ def port_ok(port: int, timeout: float = 1.0) -> bool:
     except OSError:
         return False
 
-
-def get_json(url: str, timeout: float = 2.0) -> dict:
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            return json.loads(resp.read().decode('utf-8', errors='ignore'))
-    except Exception:
-        return {}
-
-
-def get_text(url: str, timeout: float = 2.0) -> str:
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            return resp.read().decode('utf-8', errors='ignore').strip()
-    except Exception:
-        return ''
 
 
 def scan_errors(minutes: int = 30) -> list[str]:
@@ -96,7 +89,7 @@ def enabled_nanobot_jobs() -> list[str]:
 
 
 def notify_summary() -> tuple[int, int, list[str]]:
-    data = get_json('http://127.0.0.1:8094/api/status')
+    data = HTTP.get_json('http://127.0.0.1:8094/api/status', {})
     configured = data.get('configured_jobs') or []
     states = data.get('jobs') or {}
     enabled = [j for j in configured if j.get('enabled')]
@@ -111,22 +104,22 @@ def notify_summary() -> tuple[int, int, list[str]]:
 
 def sidecar_statuses() -> dict[str, bool]:
     """Return sidecar health using the manager API, with host-local fallbacks."""
-    data = get_json(SIDECAR_STATUS_API)
+    data = HTTP.get_json(SIDECAR_STATUS_API, {})
     items = data.get('items') or []
     by_id = {str(item.get('id')): item for item in items if isinstance(item, dict)}
     if by_id:
         return {label: bool((by_id.get(sid) or {}).get('ok')) for sid, label in SIDECAR_LABELS}
 
     qq_ok = (
-        get_text('http://172.17.0.1:8092/health').lower() == 'ok'
-        or get_text('http://127.0.0.1:8092/health').lower() == 'ok'
+        HTTP.get_text('http://172.17.0.1:8092/health', '').lower() == 'ok'
+        or HTTP.get_text('http://127.0.0.1:8092/health', '').lower() == 'ok'
     )
     return {
         'RSS Sidecar(8091)': port_ok(8091),
         'QQ Sidecar(8092)': qq_ok,
         'LOF Sidecar(8093)': port_ok(8093),
         'Notify Sidecar(8094)': port_ok(8094),
-        'Nanobot Health(8080)': bool(get_json('http://127.0.0.1:8080/health')),
+        'Nanobot Health(8080)': bool(HTTP.get_json('http://127.0.0.1:8080/health', {})),
     }
 
 
