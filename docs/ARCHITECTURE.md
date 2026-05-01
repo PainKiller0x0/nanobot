@@ -192,6 +192,7 @@ ops/sources/_shared/ops_common.py
 
 - `JsonHttpClient`：base URL fallback、JSON GET/POST、文本请求，支持浮点秒级 timeout。
 - `parse_dt`、`fmt_time`、`now_shanghai`。
+- `holiday_info`、`is_cn_workday`：复用中国法定节假日/补班日判断。
 - `short`：适合 QQ 输出的短文本截断。
 
 目前应复用它的脚本包括：

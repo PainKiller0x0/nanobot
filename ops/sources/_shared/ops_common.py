@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+import os
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -47,6 +49,39 @@ def parse_dt(value: Any, default_tz=SHANGHAI) -> datetime | None:
 def fmt_time(value: Any, pattern: str = "%H:%M", default: str = "-") -> str:
     dt = parse_dt(value)
     return dt.strftime(pattern) if dt else default
+
+
+HOLIDAY_DATA_DIR = Path("/root/.nanobot/workspace/skills/weather-expert")
+
+
+def holiday_info(check_date: date | None = None, env_var: str = "OPS_HOLIDAY_FILE") -> dict[str, Any]:
+    check_date = check_date or now_shanghai().date()
+    paths: list[Path] = []
+    if env_path := os.environ.get(env_var, "").strip():
+        paths.append(Path(env_path))
+    paths.extend([HOLIDAY_DATA_DIR / f"holidays_{check_date.year}.json", HOLIDAY_DATA_DIR / "holidays_cache.json"])
+
+    for path in paths:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        days = data.get("holiday") or data.get("holidays") or {}
+        for key in (check_date.strftime("%m-%d"), check_date.isoformat()):
+            item = days.get(key)
+            if isinstance(item, dict):
+                return item
+    return {}
+
+
+def is_cn_workday(check_date: date | None = None, env_var: str = "OPS_HOLIDAY_FILE") -> bool:
+    check_date = check_date or now_shanghai().date()
+    info = holiday_info(check_date, env_var=env_var)
+    if info.get("holiday") is True:
+        return False
+    if info and (info.get("wage") == 1 or info.get("after") or info.get("before") or "\u8865\u73ed" in str(info.get("name", ""))):
+        return True
+    return check_date.weekday() < 5
 
 
 class JsonHttpClient:
