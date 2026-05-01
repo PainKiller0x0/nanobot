@@ -304,15 +304,9 @@ async fn scheduler_loop(state: Arc<AppState>) {
             now.hour(),
             now.minute()
         );
+        let holiday_calendar = load_holiday_calendar(now.year());
         for job in state.config.jobs.iter().filter(|j| j.enabled) {
-            if !cron_matches(
-                &job.schedule,
-                now.minute(),
-                now.hour(),
-                now.day(),
-                now.month(),
-                now.weekday().number_from_monday(),
-            ) {
+            if !schedule_matches_at(&job.schedule, &now, &holiday_calendar) {
                 continue;
             }
             let should_run = {
@@ -817,15 +811,9 @@ fn build_job_details(jobs: &[JobConfig], statuses: &HashMap<String, JobStatus>) 
 fn next_runs_for(expr: &str, count: usize) -> Vec<String> {
     let mut out = Vec::new();
     let mut t = shanghai_now() + ChronoDuration::minutes(1);
+    let holiday_calendar = load_holiday_calendar(t.year());
     for _ in 0..(366 * 24 * 60) {
-        if cron_matches(
-            expr,
-            t.minute(),
-            t.hour(),
-            t.day(),
-            t.month(),
-            t.weekday().number_from_monday(),
-        ) {
+        if schedule_matches_at(expr, &t, &holiday_calendar) {
             out.push(t.format("%Y-%m-%d %H:%M %:z").to_string());
             if out.len() >= count {
                 break;
@@ -904,23 +892,136 @@ fn weekday_text(field: &str) -> String {
     }
 }
 
-fn cron_matches(
+#[derive(Debug, Clone, Default)]
+struct HolidayCalendar {
+    days: HashMap<String, HolidayInfo>,
+}
+
+#[derive(Debug, Clone)]
+struct HolidayInfo {
+    holiday: bool,
+    adjusted_workday: bool,
+}
+
+fn schedule_matches_at(
     expr: &str,
-    minute: u32,
-    hour: u32,
-    day: u32,
-    month: u32,
-    weekday_monday: u32,
+    t: &chrono::DateTime<FixedOffset>,
+    holidays: &HolidayCalendar,
 ) -> bool {
     let fields: Vec<&str> = expr.split_whitespace().collect();
     if fields.len() != 5 {
         return false;
     }
-    field_matches(fields[0], minute)
-        && field_matches(fields[1], hour)
-        && field_matches(fields[2], day)
-        && field_matches(fields[3], month)
-        && field_matches(fields[4], weekday_monday)
+    if !field_matches(fields[0], t.minute())
+        || !field_matches(fields[1], t.hour())
+        || !field_matches(fields[2], t.day())
+        || !field_matches(fields[3], t.month())
+    {
+        return false;
+    }
+
+    let weekday_field = fields[4];
+    let weekday_matches = field_matches(weekday_field, t.weekday().number_from_monday());
+    let holiday = holidays.get(t);
+
+    if weekday_matches {
+        if holiday.map(|h| h.holiday).unwrap_or(false)
+            && weekday_field != "*"
+            && weekday_field_touches_workday(weekday_field)
+        {
+            return false;
+        }
+        if holiday.map(|h| h.adjusted_workday).unwrap_or(false)
+            && weekday_field_is_weekend_only(weekday_field)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    holiday.map(|h| h.adjusted_workday).unwrap_or(false)
+        && weekday_field_is_broad_workday(weekday_field)
+}
+
+fn weekday_field_touches_workday(field: &str) -> bool {
+    (1..=5).any(|day| field_matches(field, day))
+}
+
+fn weekday_field_is_broad_workday(field: &str) -> bool {
+    field != "*" && (1..=5).all(|day| field_matches(field, day))
+}
+
+fn weekday_field_is_weekend_only(field: &str) -> bool {
+    field != "*"
+        && (6..=7).any(|day| field_matches(field, day))
+        && !(1..=5).any(|day| field_matches(field, day))
+}
+
+impl HolidayCalendar {
+    fn get(&self, t: &chrono::DateTime<FixedOffset>) -> Option<&HolidayInfo> {
+        let key = format!("{:04}-{:02}-{:02}", t.year(), t.month(), t.day());
+        self.days.get(&key)
+    }
+}
+
+fn load_holiday_calendar(year: i32) -> HolidayCalendar {
+    let mut calendar = HolidayCalendar::default();
+    for path in holiday_calendar_paths(year) {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        add_holidays_from_value(&mut calendar, year, &value);
+    }
+    calendar
+}
+
+fn holiday_calendar_paths(year: i32) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(path) = env::var("NOTIFY_HOLIDAY_FILE") {
+        if !path.trim().is_empty() {
+            paths.push(PathBuf::from(path));
+        }
+    }
+    let base = PathBuf::from("/root/.nanobot/workspace/skills/weather-expert");
+    paths.push(base.join(format!("holidays_{}.json", year)));
+    paths.push(base.join(format!("holidays_{}.json", year + 1)));
+    paths.push(base.join("holidays_cache.json"));
+    paths
+}
+
+fn add_holidays_from_value(calendar: &mut HolidayCalendar, fallback_year: i32, value: &Value) {
+    let Some(days) = value
+        .get("holiday")
+        .or_else(|| value.get("holidays"))
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+
+    for (day_key, item) in days {
+        let Some(holiday) = item.get("holiday").and_then(Value::as_bool) else {
+            continue;
+        };
+        let date = item
+            .get("date")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{}-{}", fallback_year, day_key));
+        let adjusted_workday = !holiday
+            && (item.get("after").and_then(Value::as_bool).unwrap_or(false)
+                || item.get("before").and_then(Value::as_bool).unwrap_or(false)
+                || item.get("wage").and_then(Value::as_i64) == Some(1));
+        calendar.days.insert(
+            date,
+            HolidayInfo {
+                holiday,
+                adjusted_workday,
+            },
+        );
+    }
 }
 
 fn field_matches(field: &str, value: u32) -> bool {

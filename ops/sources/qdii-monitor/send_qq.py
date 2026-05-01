@@ -1,13 +1,45 @@
 # NB_TIME_WINDOW_LOF
-from datetime import datetime
+import json
+import os
+from datetime import date, datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
+
+
+def _holiday_paths(check_date: date):
+    env_path = os.environ.get("LOF_HOLIDAY_FILE", "").strip()
+    if env_path:
+        yield Path(env_path)
+    base = Path("/root/.nanobot/workspace/skills/weather-expert")
+    yield base / f"holidays_{check_date.year}.json"
+    yield base / "holidays_cache.json"
+
+
+def _holiday_info(check_date: date):
+    key = check_date.strftime("%m-%d")
+    for path in _holiday_paths(check_date):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        days = data.get("holiday") or data.get("holidays") or {}
+        item = days.get(key)
+        if isinstance(item, dict):
+            return item
+    return None
+
+
+def _is_public_holiday(check_date: date) -> bool:
+    item = _holiday_info(check_date)
+    return bool(item and item.get("holiday") is True)
+
 
 _now = datetime.now(ZoneInfo("Asia/Shanghai"))
 _wd = _now.weekday()  # 0=Mon ... 6=Sun
 _hm = _now.hour * 60 + _now.minute
 _in_morning = (9 * 60 + 30) <= _hm <= (11 * 60 + 30)
 _in_afternoon = (13 * 60) <= _hm <= (15 * 60)
-if not (_wd < 5 and (_in_morning or _in_afternoon)):
+if not (_wd < 5 and not _is_public_holiday(_now.date()) and (_in_morning or _in_afternoon)):
     raise SystemExit(0)
 
 #!/usr/bin/env python3
@@ -42,14 +74,14 @@ def is_trading_day(check_date=None) -> bool:
     if check_date is None:
         check_date = date.today()
     if not USE_AKSHARE_CAL:
-        return check_date.weekday() < 5
+        return check_date.weekday() < 5 and not _is_public_holiday(check_date)
     try:
         import akshare as ak
 
         trade_dates = ak.tool_trade_date_hist_sina()["trade_date"].astype(str).tolist()
         return str(check_date) in trade_dates
     except Exception:
-        return check_date.weekday() < 5
+        return check_date.weekday() < 5 and not _is_public_holiday(check_date)
 
 
 def _is_cache_fresh_for_tag(tag: str, finished_at: Any) -> bool:
