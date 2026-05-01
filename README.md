@@ -15,7 +15,7 @@ Personal production fork of [HKUDS/nanobot](https://github.com/HKUDS/nanobot).
 - 线上部署以小内存 VPS 为目标，优先选择 Rust sidecar 和 systemd/Podman 管理。
 - 公网入口收口到一个管理/看板端口，其他服务走本机或容器内部访问。
 
-当前本地基线：`nanobot-ai 0.1.5.post2`，Python `>=3.11`。
+当前本地基线：`nanobot-ai 0.1.5.post3`，Python `>=3.11`。
 
 ### 设计原则
 

@@ -1,7 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -29,6 +29,7 @@ class ChannelsConfig(Base):
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
     transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
+    transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Optional ISO-639-1 hint for audio transcription
 
 
 class DreamConfig(Base):
@@ -89,6 +90,17 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
+    max_messages: int = Field(
+        default=120,
+        ge=0,
+    )  # Max messages to replay from session history (0 = use default 120, respects token budget)
+    consolidation_ratio: float = Field(
+        default=0.5,
+        ge=0.1,
+        le=0.95,
+        validation_alias=AliasChoices("consolidationRatio"),
+        serialization_alias="consolidationRatio",
+    )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
 
@@ -104,6 +116,7 @@ class ProviderConfig(Base):
     api_key: str | None = None
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    extra_body: dict[str, Any] | None = None  # Extra fields merged into every request body
 
 
 class ProvidersConfig(Base):
@@ -114,6 +127,7 @@ class ProvidersConfig(Base):
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
+    huggingface: ProviderConfig = Field(default_factory=ProviderConfig)
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -169,11 +183,17 @@ class GatewayConfig(Base):
 class WebSearchConfig(Base):
     """Web search tool configuration."""
 
-    provider: str = "duckduckgo"  # brave, tavily, duckduckgo, searxng, jina, kagi
+    provider: str = "duckduckgo"  # brave, tavily, duckduckgo, searxng, jina, kagi, olostep
     api_key: str = ""
     base_url: str = ""  # SearXNG base URL
     max_results: int = 5
     timeout: int = 30  # Wall-clock timeout (seconds) for search operations
+
+
+class WebFetchConfig(Base):
+    """Web fetch tool configuration."""
+
+    use_jina_reader: bool = True
 
 
 class WebToolsConfig(Base):
@@ -183,7 +203,9 @@ class WebToolsConfig(Base):
     proxy: str | None = (
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
+    user_agent: str | None = None
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
 
 
 class ExecToolConfig(Base):
