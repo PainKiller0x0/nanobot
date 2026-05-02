@@ -9,7 +9,6 @@ from typing import Any
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 
-
 _MEMORY_WORD = "\u5185\u5b58"
 _ACK_WORDS = {
     "ok",
@@ -27,6 +26,13 @@ _ACK_WORDS = {
     "\u4e86\u89e3",
     "\u660e\u767d",
 }
+
+_CASUAL_REPLIES = {
+    "\u6709\u70b9\u610f\u601d": "\u6709\u70b9\u610f\u601d\uff0c\u5c55\u5f00\u8bf4\u8bf4\uff1f",
+    "\u6709\u70b9\u610f\u601d\u7684": "\u6709\u70b9\u610f\u601d\uff0c\u5c55\u5f00\u8bf4\u8bf4\uff1f",
+    "\u6211\u5148\u4e0d\u544a\u8bc9\u4f60": "\u884c\uff0c\u90a3\u6211\u5148\u4fdd\u6301\u597d\u5947\u3002",
+}
+
 _ACTION_HINTS = (
     "\u8981\u4e0d\u8981",
     "\u662f\u5426",
@@ -64,6 +70,8 @@ def build_direct_reply(
         return _outbound(msg, _format_memory_report(model, start_time, last_usage or {}))
     if _is_ack(text) and _can_direct_ack(history or []):
         return _outbound(msg, "\u597d\uff0c\u6211\u5728\u3002")
+    if casual := _casual_reply(text):
+        return _outbound(msg, casual)
     return None
 
 
@@ -78,6 +86,10 @@ def _outbound(msg: InboundMessage, content: str) -> OutboundMessage:
 
 def _compact_text(text: str) -> str:
     return re.sub(r"[\s\uff0c\u3002\uff01\uff1f!?,.\u3001:\uff1a;\uff1b]+", "", text.lower())
+
+
+def _casual_reply(text: str) -> str | None:
+    return _CASUAL_REPLIES.get(_compact_text(text))
 
 
 def _is_memory_query(text: str) -> bool:

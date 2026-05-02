@@ -1,0 +1,9 @@
+[Unit]
+Description=Warm nanobot LLM cache after container startup
+After=podman-nanobot-cage.service
+Requires=podman-nanobot-cage.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=220
+ExecStart=/bin/sh -lc 'sleep 30; timeout 55 /usr/bin/podman exec nanobot-cage python -m nanobot.agent.warmup --limit 1 --timeout 45 --max-tokens 8 || { echo "first warmup attempt failed; retrying"; sleep 45; timeout 55 /usr/bin/podman exec nanobot-cage python -m nanobot.agent.warmup --limit 1 --timeout 45 --max-tokens 8; }'

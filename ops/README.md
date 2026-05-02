@@ -13,6 +13,7 @@ sidecarctl status
 sidecarctl url rss
 sidecarctl logs lof
 sidecarctl restart notify
+systemctl status nanobot-llm-warmup.service
 ```
 
 ```bash
@@ -27,7 +28,7 @@ sidecarctl restart notify
 - `config/notify-sidecar-rs/config.example.json`: sanitized notify bridge example; keep the real `config.json` on the server only.
 - `bin/sidecarctl`: CLI for checking URLs, status, logs, and restarts.
 - `sbin/rust-sidecar-maintain`: Build/install/cache cleanup helper for Rust sidecars.
-- `systemd/`: systemd units for Nanobot, Podman, and sidecars.
+- `systemd/`: systemd units for Nanobot, Podman, sidecars, and the post-start LLM warmup oneshot.
 - `scripts/sync-from-live.sh`: refresh this repo from the current server state.
 - `scripts/install-to-live.sh`: install the tracked files back to the server.
 

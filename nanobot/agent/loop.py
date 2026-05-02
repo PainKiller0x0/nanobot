@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import json
 import os
+import sys
 import time
 from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
@@ -287,6 +288,7 @@ class AgentLoop:
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
+        self._external_warmup_started = False
         self._session_locks: dict[str, asyncio.Lock] = {}
         # Per-session pending queues for mid-turn message injection.
         # When a session has an active task, new messages for that session
@@ -663,11 +665,75 @@ class AgentLoop:
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
         return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
 
+    @staticmethod
+    def _env_flag(name: str, default: str = "0") -> bool:
+        return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _schedule_external_llm_warmup(self) -> None:
+        """Warm the LLM in a child process so startup and health stay responsive."""
+        if self._external_warmup_started or not self._env_flag("NANOBOT_LLM_WARMUP"):
+            return
+        self._external_warmup_started = True
+
+        async def _warm() -> None:
+            try:
+                delay = float(os.environ.get("NANOBOT_LLM_WARMUP_DELAY_S", "10") or "0")
+            except ValueError:
+                delay = 10.0
+            if delay > 0:
+                await asyncio.sleep(delay)
+
+            limit = os.environ.get("NANOBOT_LLM_WARMUP_SESSIONS", "1")
+            timeout_raw = os.environ.get("NANOBOT_LLM_WARMUP_TIMEOUT_S", "120")
+            try:
+                timeout_s = float(timeout_raw)
+            except ValueError:
+                timeout_s = 120.0
+            logger.info("Starting external LLM warmup (sessions={}, timeout={}s)", limit, timeout_s)
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    "-m",
+                    "nanobot.agent.warmup",
+                    "--limit",
+                    str(limit),
+                    "--timeout",
+                    str(timeout_s),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(),
+                        timeout=max(timeout_s + 30, 60),
+                    )
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    logger.warning("External LLM warmup timed out")
+                    return
+                out = (stdout or b"").decode("utf-8", "replace").strip()
+                err = (stderr or b"").decode("utf-8", "replace").strip()
+                if proc.returncode == 0:
+                    logger.info("External LLM warmup completed: {}", out[-500:] if out else "ok")
+                else:
+                    logger.warning(
+                        "External LLM warmup failed rc={}: {} {}",
+                        proc.returncode,
+                        out[-500:],
+                        err[-500:],
+                    )
+            except Exception as exc:
+                logger.warning("External LLM warmup launch failed: {}", exc)
+
+        self._schedule_background(_warm())
+
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
         logger.info("Agent loop started")
+        self._schedule_external_llm_warmup()
         if self.startup_warm_sessions > 0:
             self._schedule_background(self._warm_recent_sessions())
 
