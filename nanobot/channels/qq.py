@@ -1338,8 +1338,6 @@ class QQChannel(BaseChannel):
             return "today"
         if any(k in compact for k in ("你能做什么", "能力列表", "能力菜单", "菜单", "帮助")) and len(compact) <= 16:
             return "menu"
-        if "内存" in compact and len(compact) <= 24:
-            return "system"
         if any(k in compact for k in ("系统状态", "服务状态", "服务健康", "服务还活着", "健康检查", "服务器状态")):
             return "system"
         if any(k in compact for k in ("定时任务", "cron", "任务状态", "任务报错", "哪些任务在跑")):
