@@ -42,6 +42,7 @@ ExecStart=/usr/bin/podman run \
   -e NANOBOT_REFLEXIO_ENABLED=true \
   -e NANOBOT_FAILOVER_SETTINGS_URL=http://172.17.0.1:8093/obp/admin/failover \
   -e PYTHONUNBUFFERED=1 \
+  -e TIKTOKEN_CACHE_DIR=/root/.nanobot/cache/tiktoken \
   -e ARK_SLOT_WORKSPACE=/root/.nanobot/workspace \
   -v /root/nanobot:/app:rw \
   -v /etc/localtime:/etc/localtime:ro \

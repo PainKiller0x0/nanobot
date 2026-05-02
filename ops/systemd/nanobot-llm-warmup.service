@@ -5,5 +5,5 @@ Requires=podman-nanobot-cage.service
 
 [Service]
 Type=oneshot
-TimeoutStartSec=220
-ExecStart=/bin/sh -lc 'sleep 30; timeout 55 /usr/bin/podman exec nanobot-cage python -m nanobot.agent.warmup --limit 1 --timeout 45 --max-tokens 8 || { echo "first warmup attempt failed; retrying"; sleep 45; timeout 55 /usr/bin/podman exec nanobot-cage python -m nanobot.agent.warmup --limit 1 --timeout 45 --max-tokens 8; }'
+TimeoutStartSec=80
+ExecStart=/bin/sh -lc 'sleep 30; /usr/bin/podman exec nanobot-cage timeout 35 python3 -m nanobot.agent.warmup --limit 1 --timeout 25 --max-tokens 4 || echo "LLM warmup best-effort attempt failed or timed out"; exit 0'

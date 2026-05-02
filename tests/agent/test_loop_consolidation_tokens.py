@@ -54,6 +54,7 @@ async def test_prompt_above_threshold_triggers_consolidation(tmp_path, monkeypat
     monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _message: 500)
 
     await loop.process_direct("hello", session_key="cli:test")
+    await loop.close_mcp()
 
     assert loop.consolidator.archive.await_count >= 1
 
@@ -194,17 +195,24 @@ async def test_consolidation_persists_summary_for_next_prepare_session(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> None:
+async def test_background_consolidation_receives_pending_summary(tmp_path) -> None:
     loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
     session = loop.sessions.get_or_create("cli:test")
     loop.auto_compact.prepare_session = MagicMock(
         return_value=(session, "Previous conversation summary: earlier context")
     )  # type: ignore[method-assign]
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    scheduled = []
+
+    def schedule(coro):
+        scheduled.append(coro)
+
+    loop._schedule_background = schedule  # type: ignore[method-assign]
 
     await loop.process_direct("hello", session_key="cli:test")
 
+    assert len(scheduled) == 1
+    await scheduled[0]
     loop.consolidator.maybe_consolidate_by_tokens.assert_awaited_once_with(
         session,
         session_summary="Previous conversation summary: earlier context",
@@ -212,8 +220,8 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) -> None:
-    """Verify preflight consolidation runs before the LLM call in process_direct."""
+async def test_background_consolidation_after_llm_call(tmp_path, monkeypatch) -> None:
+    """Hot-path replies should not wait for token consolidation."""
     order: list[str] = []
 
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
@@ -228,7 +236,12 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
         return LLMResponse(content="ok", tool_calls=[])
     loop.provider.chat_with_retry = track_llm
     loop.provider.chat_stream_with_retry = track_llm
-    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    scheduled = []
+
+    def schedule(coro):
+        scheduled.append(coro)
+
+    loop._schedule_background = schedule  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
     session.messages = [
@@ -247,6 +260,7 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
 
     await loop.process_direct("hello", session_key="cli:test")
 
-    assert "consolidate" in order
-    assert "llm" in order
-    assert order.index("consolidate") < order.index("llm")
+    assert order == ["llm"]
+    assert len(scheduled) == 1
+    await scheduled[0]
+    assert order == ["llm", "consolidate"]

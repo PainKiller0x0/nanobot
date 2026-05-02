@@ -1249,11 +1249,6 @@ class AgentLoop:
             )
             return result
 
-        await self.consolidator.maybe_consolidate_by_tokens(
-            session,
-            session_summary=pending,
-        )
-
         self._set_tool_context(
             msg.channel, msg.chat_id, msg.metadata.get("message_id"),
             msg.metadata, session_key=key,
@@ -1379,7 +1374,12 @@ class AgentLoop:
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
-        self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
+        self._schedule_background(
+            self.consolidator.maybe_consolidate_by_tokens(
+                session,
+                session_summary=pending,
+            )
+        )
         self._schedule_replay_compact(session.key)
         persist_ms = self._elapsed_ms(persist_start)
 

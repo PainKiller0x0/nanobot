@@ -25,6 +25,13 @@ COPY nanobot/ nanobot/
 COPY bridge/ bridge/
 RUN uv pip install --system --no-cache .
 
+# Preload tiktoken's encoder into the image so the first live chat turn does
+# not block on encoder download/cache creation.
+ENV TIKTOKEN_CACHE_DIR=/tmp/data-gym-cache
+RUN mkdir -p "$TIKTOKEN_CACHE_DIR" && \
+    python -c "import tiktoken; tiktoken.get_encoding('cl100k_base').encode('nanobot warmup')" && \
+    chmod -R 1777 "$TIKTOKEN_CACHE_DIR"
+
 # Build the WhatsApp bridge
 WORKDIR /app/bridge
 RUN git config --global --add url."https://github.com/".insteadOf ssh://git@github.com/ && \

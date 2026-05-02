@@ -532,6 +532,19 @@ class Consolidator:
             self._get_tool_definitions(),
         )
 
+    async def estimate_session_prompt_tokens_async(
+        self,
+        session: Session,
+        *,
+        session_summary: str | None = None,
+    ) -> tuple[int, str]:
+        """Estimate prompt tokens without blocking the asyncio event loop."""
+        return await asyncio.to_thread(
+            self.estimate_session_prompt_tokens,
+            session,
+            session_summary=session_summary,
+        )
+
     @property
     def _input_token_budget(self) -> int:
         """Available input token budget for consolidation LLM."""
@@ -606,7 +619,7 @@ class Consolidator:
         lock = self.get_lock(session.key)
         async with lock:
             try:
-                estimated, source = self.estimate_session_prompt_tokens(
+                estimated, source = await self.estimate_session_prompt_tokens_async(
                     session,
                     session_summary=session_summary,
                 )
@@ -674,7 +687,7 @@ class Consolidator:
                     break
 
                 try:
-                    estimated, source = self.estimate_session_prompt_tokens(
+                    estimated, source = await self.estimate_session_prompt_tokens_async(
                         session,
                         session_summary=session_summary,
                     )

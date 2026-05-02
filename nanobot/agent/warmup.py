@@ -19,6 +19,16 @@ _SKIP_PREFIXES = ("cron:", "cli:", "system:", "test:", "heartbeat")
 _DEFAULT_PREFER = ("qq:", "weixin:")
 
 
+def warm_tokenizer() -> None:
+    """Load tiktoken's encoder before the first live chat turn needs it."""
+    try:
+        import tiktoken
+
+        tiktoken.get_encoding("cl100k_base").encode("nanobot warmup")
+    except Exception as exc:
+        print(f"Tokenizer warmup skipped: {exc}")
+
+
 def select_warmup_sessions(
     session_infos: list[dict[str, Any]],
     *,
@@ -173,6 +183,7 @@ async def run_warmup(args: argparse.Namespace) -> int:
                 print("LLM warmup skipped: another warmup is running")
             return 0
 
+        warm_tokenizer()
         config = _load_runtime_config(args.config, args.workspace)
         loop = make_loop(config)
         session_manager = loop.sessions
