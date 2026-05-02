@@ -290,6 +290,7 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._external_warmup_started = False
+        self._tokenizer_warmup_started = False
         self._session_locks: dict[str, asyncio.Lock] = {}
         # Per-session pending queues for mid-turn message injection.
         # When a session has an active task, new messages for that session
@@ -530,6 +531,37 @@ class AgentLoop:
         hard_budget = budget if budget > 0 else max(128, self.context_window_tokens // 2)
         return min(hard_budget, soft_budget) if soft_budget else hard_budget
 
+    def _build_turn_initial_messages(
+        self,
+        session: Session,
+        msg: InboundMessage,
+        session_summary: str | None,
+    ) -> tuple[list[dict[str, Any]], str | None, list[dict[str, Any]]]:
+        """Build LLM input in a worker thread so tokenization cannot block heartbeats."""
+        history = session.get_history(
+            max_messages=self._max_messages,
+            max_tokens=self._replay_token_budget(),
+            include_timestamps=True,
+        )
+        pending_ask_id = pending_ask_user_id(history)
+        if pending_ask_id:
+            initial_messages = ask_user_tool_result_messages(
+                self.context.build_system_prompt(channel=msg.channel),
+                history,
+                pending_ask_id,
+                msg.content,
+            )
+        else:
+            initial_messages = self.context.build_messages(
+                history=history,
+                current_message=msg.content,
+                session_summary=session_summary,
+                media=msg.media if msg.media else None,
+                channel=msg.channel,
+                chat_id=self._runtime_chat_id(msg),
+            )
+        return history, pending_ask_id, initial_messages
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -729,11 +761,33 @@ class AgentLoop:
 
         self._schedule_background(_warm())
 
+    def _schedule_tokenizer_warmup(self) -> None:
+        """Warm tiktoken in this process without blocking channel heartbeats."""
+        if self._tokenizer_warmup_started:
+            return
+        self._tokenizer_warmup_started = True
+
+        def _load() -> None:
+            import tiktoken
+
+            tiktoken.get_encoding("cl100k_base").encode("nanobot warmup")
+
+        async def _warm() -> None:
+            try:
+                started = time.perf_counter()
+                await asyncio.to_thread(_load)
+                logger.info("Tokenizer warmup completed in {}ms", self._elapsed_ms(started))
+            except Exception:
+                logger.debug("Tokenizer warmup failed", exc_info=True)
+
+        self._schedule_background(_warm())
+
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
         logger.info("Agent loop started")
+        self._schedule_tokenizer_warmup()
         self._schedule_external_llm_warmup()
         if self.startup_warm_sessions > 0:
             self._schedule_background(self._warm_recent_sessions())
@@ -1258,30 +1312,12 @@ class AgentLoop:
                 message_tool.start_turn()
 
         prompt_start = time.perf_counter()
-        _hist_kwargs: dict[str, Any] = {
-            "max_messages": self._max_messages,
-            "max_tokens": self._replay_token_budget(),
-            "include_timestamps": True,
-        }
-        history = session.get_history(**_hist_kwargs)
-
-        pending_ask_id = pending_ask_user_id(history)
-        if pending_ask_id:
-            initial_messages = ask_user_tool_result_messages(
-                self.context.build_system_prompt(channel=msg.channel),
-                history,
-                pending_ask_id,
-                msg.content,
-            )
-        else:
-            initial_messages = self.context.build_messages(
-                history=history,
-                current_message=msg.content,
-                session_summary=pending,
-                media=msg.media if msg.media else None,
-                channel=msg.channel,
-                chat_id=self._runtime_chat_id(msg),
-            )
+        history, pending_ask_id, initial_messages = await asyncio.to_thread(
+            self._build_turn_initial_messages,
+            session,
+            msg,
+            pending,
+        )
 
         prompt_ms = self._elapsed_ms(prompt_start)
         prep_ms = int((prompt_start - turn_start) * 1000)

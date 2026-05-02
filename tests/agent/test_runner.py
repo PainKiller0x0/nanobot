@@ -45,6 +45,62 @@ def _make_loop(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_runner_uses_obp_fallback_on_timeout_like_error(monkeypatch):
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.providers import openai_compat_provider
+
+    primary = MagicMock()
+    primary.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(
+            content="Error calling LLM: Request timed out.",
+            finish_reason="error",
+            error_kind="timeout",
+        )
+    )
+
+    captured: dict[str, object] = {}
+
+    class FakeFallbackProvider:
+        def __init__(self, *, api_key, api_base, default_model):
+            captured["api_key"] = api_key
+            captured["api_base"] = api_base
+            captured["default_model"] = default_model
+
+        async def chat_with_retry(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return LLMResponse(
+                content="fallback ok",
+                usage={"prompt_tokens": 1, "completion_tokens": 2},
+            )
+
+    monkeypatch.setenv("NANOBOT_OBP_FALLBACK_BASE", "http://obp.local/v1")
+    monkeypatch.setenv("NANOBOT_OBP_FALLBACK_MODEL", "LongCat-Flash-Chat")
+    monkeypatch.setenv("OBP_PROXY_TOKEN", "proxy-token")
+    monkeypatch.setenv("NANOBOT_OBP_FALLBACK_MAX_TOKENS", "128")
+    monkeypatch.setattr(openai_compat_provider, "OpenAICompatProvider", FakeFallbackProvider)
+
+    tools = MagicMock()
+    tools.get_definitions.return_value = [{"type": "function", "function": {"name": "x"}}]
+    runner = AgentRunner(primary)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="primary-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        max_tokens=256,
+    ))
+
+    assert result.final_content == "fallback ok"
+    assert captured["api_key"] == "proxy-token"
+    assert captured["api_base"] == "http://obp.local/v1"
+    kwargs = captured["kwargs"]
+    assert kwargs["model"] == "LongCat-Flash-Chat"
+    assert kwargs["tools"] is None
+    assert kwargs["max_tokens"] == 128
+
+
+@pytest.mark.asyncio
 async def test_runner_preserves_reasoning_fields_and_tool_results():
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 

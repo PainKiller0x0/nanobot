@@ -29,6 +29,7 @@ ExecStart=/usr/bin/podman run \
   --cpus 1 \
   --security-opt label=disable \
   --env-file /root/.nanobot/secrets/nanobot.env \
+  --env-file /root/.nanobot/secrets/obp-proxy.env \
   -p 127.0.0.1:8080:18790 \
   -e PYTHONMALLOC=malloc \
   -e TZ=Asia/Shanghai \
@@ -41,6 +42,11 @@ ExecStart=/usr/bin/podman run \
   -e NANOBOT_CHANNEL_ALLOWLIST=qq,weixin \
   -e NANOBOT_REFLEXIO_ENABLED=true \
   -e NANOBOT_FAILOVER_SETTINGS_URL=http://172.17.0.1:8093/obp/admin/failover \
+  -e NANOBOT_LLM_TIMEOUT_S=35 \
+  -e NANOBOT_OBP_FALLBACK_BASE=http://172.17.0.1:8093/obp/v1 \
+  -e NANOBOT_OBP_FALLBACK_MODEL=LongCat-Flash-Chat \
+  -e NANOBOT_OBP_FALLBACK_TIMEOUT_S=35 \
+  -e NANOBOT_OBP_FALLBACK_MAX_TOKENS=1024 \
   -e PYTHONUNBUFFERED=1 \
   -e TIKTOKEN_CACHE_DIR=/root/.nanobot/cache/tiktoken \
   -e ARK_SLOT_WORKSPACE=/root/.nanobot/workspace \
