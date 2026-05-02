@@ -59,6 +59,8 @@ class ChannelManager:
         self._session_manager = session_manager
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self._send_queues: dict[tuple[str, str], asyncio.Queue[tuple[BaseChannel, OutboundMessage]]] = {}
+        self._send_tasks: dict[tuple[str, str], asyncio.Task] = {}
 
         self._init_channels()
 
@@ -224,6 +226,12 @@ class ChannelManager:
                 await self._dispatch_task
             except asyncio.CancelledError:
                 pass
+        for task in list(getattr(self, "_send_tasks", {}).values()):
+            task.cancel()
+        if getattr(self, "_send_tasks", None):
+            await asyncio.gather(*self._send_tasks.values(), return_exceptions=True)
+            self._send_tasks.clear()
+            self._send_queues.clear()
 
         # Stop all channels
         for name, channel in self.channels.items():
@@ -273,7 +281,7 @@ class ChannelManager:
 
                 channel = self.channels.get(msg.channel)
                 if channel:
-                    await self._send_with_retry(channel, msg)
+                    await self._enqueue_send(channel, msg)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
 
@@ -281,6 +289,36 @@ class ChannelManager:
                 continue
             except asyncio.CancelledError:
                 break
+
+    def _ensure_send_worker_state(self) -> None:
+        """Initialize async send worker fields for tests that bypass __init__."""
+        if not hasattr(self, "_send_queues"):
+            self._send_queues = {}
+        if not hasattr(self, "_send_tasks"):
+            self._send_tasks = {}
+
+    async def _enqueue_send(self, channel: BaseChannel, msg: OutboundMessage) -> None:
+        """Queue sends per target so one slow channel API cannot block dispatch."""
+        self._ensure_send_worker_state()
+        key = (msg.channel, str(msg.chat_id))
+        queue = self._send_queues.get(key)
+        if queue is None:
+            queue = asyncio.Queue(maxsize=100)
+            self._send_queues[key] = queue
+        task = self._send_tasks.get(key)
+        if task is None or task.done():
+            self._send_tasks[key] = asyncio.create_task(self._send_worker(key))
+        await queue.put((channel, msg))
+
+    async def _send_worker(self, key: tuple[str, str]) -> None:
+        """Serialize outbound sends for one channel/chat target."""
+        queue = self._send_queues[key]
+        while True:
+            channel, msg = await queue.get()
+            try:
+                await self._send_with_retry(channel, msg)
+            finally:
+                queue.task_done()
 
     @staticmethod
     async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:

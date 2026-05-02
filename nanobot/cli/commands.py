@@ -583,6 +583,9 @@ def serve(
         model=runtime_config.agents.defaults.model,
         max_iterations=runtime_config.agents.defaults.max_tool_iterations,
         context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
+        history_replay_tokens=runtime_config.agents.defaults.history_replay_tokens,
+        eager_compact_tokens=runtime_config.agents.defaults.eager_compact_tokens,
+        startup_warm_sessions=runtime_config.agents.defaults.startup_warm_sessions,
         context_block_limit=runtime_config.agents.defaults.context_block_limit,
         max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
         provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
@@ -596,6 +599,8 @@ def serve(
         unified_session=runtime_config.agents.defaults.unified_session,
         disabled_skills=runtime_config.agents.defaults.disabled_skills,
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
+        max_messages=runtime_config.agents.defaults.max_messages,
+        consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
         tools_config=runtime_config.tools,
     )
 
@@ -686,6 +691,9 @@ def _run_gateway(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
+        history_replay_tokens=config.agents.defaults.history_replay_tokens,
+        eager_compact_tokens=config.agents.defaults.eager_compact_tokens,
+        startup_warm_sessions=config.agents.defaults.startup_warm_sessions,
         web_config=config.tools.web,
         context_block_limit=config.agents.defaults.context_block_limit,
         max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
@@ -700,6 +708,8 @@ def _run_gateway(
         unified_session=config.agents.defaults.unified_session,
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        max_messages=config.agents.defaults.max_messages,
+        consolidation_ratio=config.agents.defaults.consolidation_ratio,
         tools_config=config.tools,
     )
 
@@ -1094,6 +1104,9 @@ def agent(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
+        history_replay_tokens=config.agents.defaults.history_replay_tokens,
+        eager_compact_tokens=config.agents.defaults.eager_compact_tokens,
+        startup_warm_sessions=config.agents.defaults.startup_warm_sessions,
         web_config=config.tools.web,
         context_block_limit=config.agents.defaults.context_block_limit,
         max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
@@ -1107,6 +1120,8 @@ def agent(
         unified_session=config.agents.defaults.unified_session,
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        max_messages=config.agents.defaults.max_messages,
+        consolidation_ratio=config.agents.defaults.consolidation_ratio,
         tools_config=config.tools,
     )
     restart_notice = consume_restart_notice_from_env()

@@ -535,7 +535,11 @@ class Consolidator:
     @property
     def _input_token_budget(self) -> int:
         """Available input token budget for consolidation LLM."""
-        return self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+        try:
+            max_completion = int(self.max_completion_tokens)
+        except (TypeError, ValueError):
+            max_completion = 4096
+        return self.context_window_tokens - max_completion - self._SAFETY_BUFFER
 
     def _truncate_to_token_budget(self, text: str) -> str:
         """Truncate text so it fits within the consolidation LLM's token budget."""
@@ -586,24 +590,21 @@ class Consolidator:
             self.store.raw_archive(messages)
             return None
 
-    async def maybe_consolidate_by_tokens(
+    async def _consolidate_until_budget(
         self,
         session: Session,
         *,
+        budget: int,
+        target: int,
+        label: str,
         session_summary: str | None = None,
     ) -> None:
-        """Loop: archive old messages until prompt fits within safe budget.
-
-        The budget reserves space for completion tokens and a safety buffer
-        so the LLM request never exceeds the context window.
-        """
-        if not session.messages or self.context_window_tokens <= 0:
+        """Archive old messages until the estimated prompt is under *target*."""
+        if not session.messages or budget <= 0 or target <= 0:
             return
 
         lock = self.get_lock(session.key)
         async with lock:
-            budget = self._input_token_budget
-            target = int(budget * self.consolidation_ratio)
             try:
                 estimated, source = self.estimate_session_prompt_tokens(
                     session,
@@ -617,10 +618,11 @@ class Consolidator:
             if estimated < budget:
                 unconsolidated_count = len(session.messages) - session.last_consolidated
                 logger.debug(
-                    "Token consolidation idle {}: {}/{} via {}, msgs={}",
+                    "{} idle {}: {}/{} via {}, msgs={}",
+                    label,
                     session.key,
                     estimated,
-                    self.context_window_tokens,
+                    budget,
                     source,
                     unconsolidated_count,
                 )
@@ -634,7 +636,8 @@ class Consolidator:
                 boundary = self.pick_consolidation_boundary(session, max(1, estimated - target))
                 if boundary is None:
                     logger.debug(
-                        "Token consolidation: no safe boundary for {} (round {})",
+                        "{}: no safe boundary for {} (round {})",
+                        label,
                         session.key,
                         round_num,
                     )
@@ -647,11 +650,12 @@ class Consolidator:
                     break
 
                 logger.info(
-                    "Token consolidation round {} for {}: {}/{} via {}, chunk={} msgs",
+                    "{} round {} for {}: {}/{} via {}, chunk={} msgs",
+                    label,
                     round_num,
                     session.key,
                     estimated,
-                    self.context_window_tokens,
+                    budget,
                     source,
                     len(chunk),
                 )
@@ -689,6 +693,56 @@ class Consolidator:
                     "last_active": session.updated_at.isoformat(),
                 }
                 self.sessions.save(session)
+
+    async def maybe_consolidate_by_tokens(
+        self,
+        session: Session,
+        *,
+        session_summary: str | None = None,
+    ) -> None:
+        """Archive old messages until prompt fits within the provider context window.
+
+        The budget reserves space for completion tokens and a safety buffer
+        so the LLM request never exceeds the context window.
+        """
+        if self.context_window_tokens <= 0:
+            return
+        budget = self._input_token_budget
+        if budget <= 0:
+            budget = max(128, self.context_window_tokens // 2)
+        target = int(budget * self.consolidation_ratio)
+        await self._consolidate_until_budget(
+            session,
+            budget=budget,
+            target=target,
+            label="Token consolidation",
+            session_summary=session_summary,
+        )
+
+    async def maybe_consolidate_for_replay(
+        self,
+        session: Session,
+        *,
+        prompt_budget_tokens: int,
+        session_summary: str | None = None,
+    ) -> None:
+        """Keep hot-session replay small even when the provider context is huge.
+
+        This is a cache/latency optimization, not a hard safety limit. Older
+        turns are summarized into history.jsonl and the recent legal suffix is
+        retained in the session file, preserving the short-term conversation
+        while avoiding cold prompts that replay tens of thousands of tokens.
+        """
+        if prompt_budget_tokens <= 0:
+            return
+        target = max(1024, int(prompt_budget_tokens * self.consolidation_ratio))
+        await self._consolidate_until_budget(
+            session,
+            budget=prompt_budget_tokens,
+            target=target,
+            label="Replay consolidation",
+            session_summary=session_summary,
+        )
 
 
 # ---------------------------------------------------------------------------

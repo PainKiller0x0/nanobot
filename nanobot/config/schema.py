@@ -75,6 +75,25 @@ class AgentDefaults(Base):
     )
     max_tokens: int = 8192
     context_window_tokens: int = 65_536
+    history_replay_tokens: int = Field(
+        default=16_000,
+        ge=0,
+        validation_alias=AliasChoices("historyReplayTokens", "history_replay_tokens"),
+        serialization_alias="historyReplayTokens",
+    )  # Soft cap for raw session history replay (0 = use full context-derived budget)
+    eager_compact_tokens: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("eagerCompactTokens", "eager_compact_tokens"),
+        serialization_alias="eagerCompactTokens",
+    )  # Background compact trigger for cache-friendly prompts (0 = disabled)
+    startup_warm_sessions: int = Field(
+        default=0,
+        ge=0,
+        le=50,
+        validation_alias=AliasChoices("startupWarmSessions", "startup_warm_sessions"),
+        serialization_alias="startupWarmSessions",
+    )  # Recent sessions to pre-compact after startup (0 = disabled)
     context_block_limit: int | None = None
     temperature: float = 0.1
     max_tool_iterations: int = 200

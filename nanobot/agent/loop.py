@@ -15,6 +15,7 @@ from loguru import logger
 
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.direct_reply import build_direct_reply
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
@@ -189,6 +190,9 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int | None = None,
         context_window_tokens: int | None = None,
+        history_replay_tokens: int | None = None,
+        eager_compact_tokens: int | None = None,
+        startup_warm_sessions: int | None = None,
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
         provider_retry_mode: str = "standard",
@@ -228,6 +232,21 @@ class AgentLoop:
             context_window_tokens
             if context_window_tokens is not None
             else defaults.context_window_tokens
+        )
+        self.history_replay_tokens = (
+            history_replay_tokens
+            if history_replay_tokens is not None
+            else defaults.history_replay_tokens
+        )
+        self.eager_compact_tokens = (
+            eager_compact_tokens
+            if eager_compact_tokens is not None
+            else defaults.eager_compact_tokens
+        )
+        self.startup_warm_sessions = (
+            startup_warm_sessions
+            if startup_warm_sessions is not None
+            else defaults.startup_warm_sessions
         )
         self.context_block_limit = context_block_limit
         self.max_tool_result_chars = (
@@ -496,15 +515,17 @@ class AgentLoop:
 
     def _replay_token_budget(self) -> int:
         """Derive a token budget for session history replay from the context window."""
+        soft_budget = self.history_replay_tokens if self.history_replay_tokens > 0 else 0
         if self.context_window_tokens <= 0:
-            return 0
+            return soft_budget
         max_output = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
         try:
             reserved_output = int(max_output)
         except (TypeError, ValueError):
             reserved_output = 4096
         budget = self.context_window_tokens - max(1, reserved_output) - 1024
-        return budget if budget > 0 else max(128, self.context_window_tokens // 2)
+        hard_budget = budget if budget > 0 else max(128, self.context_window_tokens // 2)
+        return min(hard_budget, soft_budget) if soft_budget else hard_budget
 
     async def _run_agent_loop(
         self,
@@ -647,6 +668,8 @@ class AgentLoop:
         self._running = True
         await self._connect_mcp()
         logger.info("Agent loop started")
+        if self.startup_warm_sessions > 0:
+            self._schedule_background(self._warm_recent_sessions())
 
         while self._running:
             try:
@@ -846,6 +869,46 @@ class AgentLoop:
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
 
+    async def _warm_recent_sessions(self) -> None:
+        """Pre-compact recent sessions after startup so first replies stay snappy."""
+        if self.eager_compact_tokens <= 0 or self.startup_warm_sessions <= 0:
+            return
+        try:
+            sessions = sorted(
+                self.sessions.list_sessions(),
+                key=lambda item: item.get("updated_at") or "",
+                reverse=True,
+            )[: self.startup_warm_sessions]
+            for info in sessions:
+                key = info.get("key")
+                if not key:
+                    continue
+                session = self.sessions.get_or_create(key)
+                await self.consolidator.maybe_consolidate_for_replay(
+                    session,
+                    prompt_budget_tokens=self.eager_compact_tokens,
+                )
+                self.sessions.save(session)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("Startup session warmup failed", exc_info=True)
+
+    def _schedule_replay_compact(self, session_key: str) -> None:
+        """Schedule background compaction against the soft replay budget."""
+        if self.eager_compact_tokens <= 0:
+            return
+
+        async def _compact() -> None:
+            session = self.sessions.get_or_create(session_key)
+            await self.consolidator.maybe_consolidate_for_replay(
+                session,
+                prompt_budget_tokens=self.eager_compact_tokens,
+            )
+            self.sessions.save(session)
+
+        self._schedule_background(_compact())
+
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
@@ -926,6 +989,7 @@ class AgentLoop:
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
             self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
+            self._schedule_replay_compact(session.key)
             options = ask_user_options_from_messages(all_msgs) if stop_reason == "ask_user" else []
             content, buttons = ask_user_outbound(
                 final_content or "Background task completed.",
@@ -956,6 +1020,15 @@ class AgentLoop:
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+
+        if direct := build_direct_reply(
+            msg,
+            model=self.model,
+            start_time=self._start_time,
+            last_usage=self._last_usage,
+        ):
+            logger.info("Direct reply to {}:{}: {}", msg.channel, msg.sender_id, direct.content[:80])
+            return direct
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
@@ -1083,6 +1156,7 @@ class AgentLoop:
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
         self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
+        self._schedule_replay_compact(session.key)
 
         # When follow-up messages were injected mid-turn, a later natural
         # language reply may address those follow-ups and should not be

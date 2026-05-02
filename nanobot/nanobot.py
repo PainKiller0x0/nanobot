@@ -73,6 +73,9 @@ class Nanobot:
             model=defaults.model,
             max_iterations=defaults.max_tool_iterations,
             context_window_tokens=defaults.context_window_tokens,
+            history_replay_tokens=defaults.history_replay_tokens,
+            eager_compact_tokens=defaults.eager_compact_tokens,
+            startup_warm_sessions=defaults.startup_warm_sessions,
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
             provider_retry_mode=defaults.provider_retry_mode,
@@ -84,6 +87,7 @@ class Nanobot:
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
             session_ttl_minutes=defaults.session_ttl_minutes,
+            max_messages=defaults.max_messages,
             consolidation_ratio=defaults.consolidation_ratio,
             tools_config=config.tools,
         )
