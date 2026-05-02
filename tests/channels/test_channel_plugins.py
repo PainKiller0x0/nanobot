@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -621,6 +623,58 @@ async def test_send_with_retry_succeeds_first_try():
     await mgr._send_with_retry(mgr.channels["failing"], msg)
 
     assert call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_enqueue_send_adds_turn_queue_trace_metadata():
+    """Messages with a turn_id get queue timing metadata for send tracing."""
+
+    class _TraceChannel(BaseChannel):
+        name = "trace"
+        display_name = "Trace"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=1),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {}
+    mgr._send_queues = {}
+    mgr._send_tasks = {}
+    channel = _TraceChannel(fake_config, mgr.bus)
+    key = ("trace", "123")
+    blocker = asyncio.create_task(asyncio.sleep(60))
+    mgr._send_queues[key] = asyncio.Queue()
+    mgr._send_tasks[key] = blocker
+
+    try:
+        msg = OutboundMessage(
+            channel="trace",
+            chat_id="123",
+            content="hello",
+            metadata={"_turn_id": "abc123", "_turn_started_perf": time.perf_counter()},
+        )
+        await mgr._enqueue_send(channel, msg)
+        _, queued = await mgr._send_queues[key].get()
+    finally:
+        blocker.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await blocker
+
+    assert queued.metadata["_turn_id"] == "abc123"
+    assert isinstance(queued.metadata["_send_queued_perf"], float)
+    assert queued.metadata["_send_queue_depth"] == 0
 
 
 @pytest.mark.asyncio

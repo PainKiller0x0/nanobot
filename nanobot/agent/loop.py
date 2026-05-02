@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -975,6 +976,108 @@ class AgentLoop:
 
         self._schedule_background(_compact())
 
+    @staticmethod
+    def _new_turn_id() -> str:
+        return uuid.uuid4().hex[:8]
+
+    @staticmethod
+    def _elapsed_ms(start: float) -> int:
+        return int((time.perf_counter() - start) * 1000)
+
+    @staticmethod
+    def _turn_metadata(
+        base: dict[str, Any] | None,
+        turn_id: str,
+        turn_start: float,
+        *,
+        path: str,
+        process_ms: int | None = None,
+        prep_ms: int | None = None,
+        prompt_ms: int | None = None,
+        llm_ms: int | None = None,
+        persist_ms: int | None = None,
+    ) -> dict[str, Any]:
+        meta = dict(base or {})
+        meta.setdefault("_turn_id", turn_id)
+        meta.setdefault("_turn_started_perf", turn_start)
+        meta["_turn_path"] = path
+        if process_ms is not None:
+            meta["_turn_process_ms"] = process_ms
+        if prep_ms is not None:
+            meta["_turn_prep_ms"] = prep_ms
+        if prompt_ms is not None:
+            meta["_turn_prompt_ms"] = prompt_ms
+        if llm_ms is not None:
+            meta["_turn_llm_ms"] = llm_ms
+        if persist_ms is not None:
+            meta["_turn_persist_ms"] = persist_ms
+        return meta
+
+    def _attach_turn_metadata(
+        self,
+        outbound: OutboundMessage,
+        turn_id: str,
+        turn_start: float,
+        *,
+        path: str,
+        process_ms: int | None = None,
+        prep_ms: int | None = None,
+        prompt_ms: int | None = None,
+        llm_ms: int | None = None,
+        persist_ms: int | None = None,
+    ) -> OutboundMessage:
+        return dataclasses.replace(
+            outbound,
+            metadata=self._turn_metadata(
+                outbound.metadata,
+                turn_id,
+                turn_start,
+                path=path,
+                process_ms=process_ms,
+                prep_ms=prep_ms,
+                prompt_ms=prompt_ms,
+                llm_ms=llm_ms,
+                persist_ms=persist_ms,
+            ),
+        )
+
+    @staticmethod
+    def _log_turn_summary(
+        *,
+        turn_id: str,
+        channel: str,
+        chat_id: str,
+        path: str,
+        total_ms: int,
+        prep_ms: int = 0,
+        prompt_ms: int = 0,
+        llm_ms: int = 0,
+        persist_ms: int = 0,
+        usage: dict[str, int] | None = None,
+        stop_reason: str | None = None,
+        content_chars: int = 0,
+    ) -> None:
+        usage = usage or {}
+        logger.info(
+            "Turn summary turn_id={} channel={} chat_id={} path={} total_ms={} "
+            "prep_ms={} prompt_ms={} llm_ms={} persist_ms={} prompt_tokens={} "
+            "cached_tokens={} completion_tokens={} stop_reason={} content_chars={}",
+            turn_id,
+            channel,
+            chat_id,
+            path,
+            total_ms,
+            prep_ms,
+            prompt_ms,
+            llm_ms,
+            persist_ms,
+            usage.get("prompt_tokens", 0),
+            usage.get("cached_tokens", 0),
+            usage.get("completion_tokens", 0),
+            stop_reason or "",
+            content_chars,
+        )
+
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
@@ -990,6 +1093,8 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        turn_id = str((msg.metadata or {}).get("_turn_id") or self._new_turn_id())
+        turn_start = time.perf_counter()
         self._refresh_provider_snapshot()
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
@@ -1085,7 +1190,13 @@ class AgentLoop:
             msg = dataclasses.replace(msg, content=new_content, media=image_only)
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+        logger.info(
+            "Processing message turn_id={} from {}:{}: {}",
+            turn_id,
+            msg.channel,
+            msg.sender_id,
+            preview,
+        )
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
@@ -1103,7 +1214,22 @@ class AgentLoop:
             history=direct_history,
         ):
             self._save_direct_turn(session, msg, direct)
-            logger.info("Direct reply to {}:{}: {}", msg.channel, msg.sender_id, direct.content[:80])
+            total_ms = self._elapsed_ms(turn_start)
+            logger.info(
+                "Direct reply to {}:{} turn_id={}: {}",
+                msg.channel,
+                msg.sender_id,
+                turn_id,
+                direct.content[:80],
+            )
+            self._log_turn_summary(
+                turn_id=turn_id,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                path="direct",
+                total_ms=total_ms,
+                content_chars=len(direct.content or ""),
+            )
             return direct
 
         session, pending = self.auto_compact.prepare_session(session, key)
@@ -1112,6 +1238,15 @@ class AgentLoop:
         raw = msg.content.strip()
         ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
         if result := await self.commands.dispatch(ctx):
+            total_ms = self._elapsed_ms(turn_start)
+            self._log_turn_summary(
+                turn_id=turn_id,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                path="command",
+                total_ms=total_ms,
+                content_chars=len(result.content or ""),
+            )
             return result
 
         await self.consolidator.maybe_consolidate_by_tokens(
@@ -1127,6 +1262,7 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
+        prompt_start = time.perf_counter()
         _hist_kwargs: dict[str, Any] = {
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
@@ -1152,13 +1288,22 @@ class AgentLoop:
                 chat_id=self._runtime_chat_id(msg),
             )
 
+        prompt_ms = self._elapsed_ms(prompt_start)
+        prep_ms = int((prompt_start - turn_start) * 1000)
+
         async def _bus_progress(
             content: str,
             *,
             tool_hint: bool = False,
             tool_events: list[dict[str, Any]] | None = None,
         ) -> None:
-            meta = dict(msg.metadata or {})
+            meta = self._turn_metadata(
+                msg.metadata,
+                turn_id,
+                turn_start,
+                path="progress",
+                process_ms=self._elapsed_ms(turn_start),
+            )
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
             if tool_events:
@@ -1173,7 +1318,13 @@ class AgentLoop:
             )
 
         async def _on_retry_wait(content: str) -> None:
-            meta = dict(msg.metadata or {})
+            meta = self._turn_metadata(
+                msg.metadata,
+                turn_id,
+                turn_start,
+                path="retry_wait",
+                process_ms=self._elapsed_ms(turn_start),
+            )
             meta["_retry_wait"] = True
             await self.bus.publish_outbound(
                 OutboundMessage(
@@ -1199,6 +1350,7 @@ class AgentLoop:
             self.sessions.save(session)
             user_persisted_early = True
 
+        llm_start = time.perf_counter()
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
@@ -1213,10 +1365,13 @@ class AgentLoop:
             session_key=key,
             pending_queue=pending_queue,
         )
+        llm_ms = self._elapsed_ms(llm_start)
+        usage = dict(self._last_usage or {})
 
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
+        persist_start = time.perf_counter()
         # Skip the already-persisted user message when saving the turn
         save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
         self._save_turn(session, all_msgs, save_skip)
@@ -1226,6 +1381,7 @@ class AgentLoop:
         self.sessions.save(session)
         self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
         self._schedule_replay_compact(session.key)
+        persist_ms = self._elapsed_ms(persist_start)
 
         # When follow-up messages were injected mid-turn, a later natural
         # language reply may address those follow-ups and should not be
@@ -1235,10 +1391,23 @@ class AgentLoop:
         # came from MessageTool.
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             if not had_injections or stop_reason == "empty_final_response":
+                self._log_turn_summary(
+                    turn_id=turn_id,
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    path="message_tool",
+                    total_ms=self._elapsed_ms(turn_start),
+                    prep_ms=prep_ms,
+                    prompt_ms=prompt_ms,
+                    llm_ms=llm_ms,
+                    persist_ms=persist_ms,
+                    usage=usage,
+                    stop_reason=stop_reason,
+                )
                 return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        logger.info("Response to {}:{} turn_id={}: {}", msg.channel, msg.sender_id, turn_id, preview)
 
         meta = dict(msg.metadata or {})
         final_content, buttons = ask_user_outbound(
@@ -1248,13 +1417,40 @@ class AgentLoop:
         )
         if on_stream is not None and stop_reason not in {"ask_user", "error"}:
             meta["_streamed"] = True
-        return OutboundMessage(
+        outbound = OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
             metadata=meta,
             buttons=buttons,
         )
+        total_ms = self._elapsed_ms(turn_start)
+        outbound = self._attach_turn_metadata(
+            outbound,
+            turn_id,
+            turn_start,
+            path="llm",
+            process_ms=total_ms,
+            prep_ms=prep_ms,
+            prompt_ms=prompt_ms,
+            llm_ms=llm_ms,
+            persist_ms=persist_ms,
+        )
+        self._log_turn_summary(
+            turn_id=turn_id,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            path="llm",
+            total_ms=total_ms,
+            prep_ms=prep_ms,
+            prompt_ms=prompt_ms,
+            llm_ms=llm_ms,
+            persist_ms=persist_ms,
+            usage=usage,
+            stop_reason=stop_reason,
+            content_chars=len(final_content or ""),
+        )
+        return outbound
 
     def _sanitize_persisted_blocks(
         self,

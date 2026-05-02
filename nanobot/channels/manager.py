@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -308,6 +310,11 @@ class ChannelManager:
         task = self._send_tasks.get(key)
         if task is None or task.done():
             self._send_tasks[key] = asyncio.create_task(self._send_worker(key))
+        if msg.metadata.get("_turn_id"):
+            meta = dict(msg.metadata)
+            meta["_send_queued_perf"] = time.perf_counter()
+            meta["_send_queue_depth"] = queue.qsize()
+            msg = dataclasses.replace(msg, metadata=meta)
         await queue.put((channel, msg))
 
     async def _send_worker(self, key: tuple[str, str]) -> None:
@@ -425,10 +432,12 @@ class ChannelManager:
         Note: CancelledError is re-raised to allow graceful shutdown.
         """
         max_attempts = max(self.config.channels.send_max_retries, 1)
+        send_start = time.perf_counter()
 
         for attempt in range(max_attempts):
             try:
                 await self._send_once(channel, msg)
+                self._log_turn_send(msg, attempts=attempt + 1, send_start=send_start)
                 return  # Send succeeded
             except asyncio.CancelledError:
                 raise  # Propagate cancellation for graceful shutdown
@@ -437,6 +446,13 @@ class ChannelManager:
                     logger.error(
                         "Failed to send to {} after {} attempts: {} - {}",
                         msg.channel, max_attempts, type(e).__name__, e
+                    )
+                    self._log_turn_send(
+                        msg,
+                        attempts=max_attempts,
+                        send_start=send_start,
+                        failed=True,
+                        error=e,
                     )
                     await self._send_delivery_alert(channel, msg, max_attempts, e)
                     return
@@ -449,6 +465,62 @@ class ChannelManager:
                     await asyncio.sleep(delay)
                 except asyncio.CancelledError:
                     raise  # Propagate cancellation during sleep
+
+    @staticmethod
+    def _elapsed_meta_ms(meta: dict[str, Any], key: str, *, end: float | None = None) -> int:
+        try:
+            start = float(meta.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+        if start <= 0:
+            return 0
+        return int(((end if end is not None else time.perf_counter()) - start) * 1000)
+
+    def _log_turn_send(
+        self,
+        msg: OutboundMessage,
+        *,
+        attempts: int,
+        send_start: float,
+        failed: bool = False,
+        error: Exception | None = None,
+    ) -> None:
+        meta = msg.metadata or {}
+        turn_id = meta.get("_turn_id")
+        if not turn_id:
+            return
+        now = time.perf_counter()
+        send_ms = int((now - send_start) * 1000)
+        queue_ms = self._elapsed_meta_ms(meta, "_send_queued_perf", end=send_start)
+        total_ms = self._elapsed_meta_ms(meta, "_turn_started_perf", end=now)
+        if failed:
+            logger.warning(
+                "Turn send failed turn_id={} channel={} chat_id={} attempts={} "
+                "queue_ms={} send_ms={} total_ms={} error={}:{}",
+                turn_id,
+                msg.channel,
+                msg.chat_id,
+                attempts,
+                queue_ms,
+                send_ms,
+                total_ms,
+                type(error).__name__ if error else "",
+                error or "",
+            )
+            return
+        logger.info(
+            "Turn send turn_id={} channel={} chat_id={} attempts={} queue_ms={} "
+            "send_ms={} total_ms={} queue_depth={} content_chars={}",
+            turn_id,
+            msg.channel,
+            msg.chat_id,
+            attempts,
+            queue_ms,
+            send_ms,
+            total_ms,
+            meta.get("_send_queue_depth", 0),
+            len(msg.content or ""),
+        )
 
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""
