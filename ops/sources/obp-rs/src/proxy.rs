@@ -631,6 +631,7 @@ async fn record_result(
         latency_ms,
         usage,
     );
+    log_model_route(&log, ch);
 
     {
         let mut channels = state.channels.lock().await;
@@ -656,6 +657,51 @@ async fn record_result(
         let mut stats = state.stats.lock().await;
         stats.record(log);
         save_stats(&state.stats_path, &stats);
+    }
+}
+
+fn log_model_route(log: &RequestLog, ch: &Channel) {
+    let group = if ch.group.trim().is_empty() {
+        "-"
+    } else {
+        ch.group.trim()
+    };
+    if (200..400).contains(&log.status) {
+        tracing::info!(
+            target: "obp.model",
+            time = %log.time,
+            channel = %log.channel,
+            group = %group,
+            requested_model = %log.requested_model,
+            actual_model = %log.model,
+            route = %log.route,
+            status = log.status,
+            latency_ms = log.latency_ms,
+            prompt_tokens = log.prompt_tokens,
+            cached_tokens = log.cached_tokens,
+            completion_tokens = log.completion_tokens,
+            cost_cny = log.cost_cny,
+            reason = %log.route_reason,
+            "obp_model_route"
+        );
+    } else {
+        tracing::warn!(
+            target: "obp.model",
+            time = %log.time,
+            channel = %log.channel,
+            group = %group,
+            requested_model = %log.requested_model,
+            actual_model = %log.model,
+            route = %log.route,
+            status = log.status,
+            latency_ms = log.latency_ms,
+            prompt_tokens = log.prompt_tokens,
+            cached_tokens = log.cached_tokens,
+            completion_tokens = log.completion_tokens,
+            cost_cny = log.cost_cny,
+            reason = %log.route_reason,
+            "obp_model_route"
+        );
     }
 }
 
