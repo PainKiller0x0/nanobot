@@ -17,7 +17,7 @@
     .field{display:block}.field-label{display:flex;align-items:center;gap:.35rem;margin:0 0 .35rem .15rem;font-size:.78rem;font-weight:900;color:rgb(100 116 139)}
     .q{display:inline-flex;align-items:center;justify-content:center;width:1rem;height:1rem;border-radius:999px;background:rgb(226 232 240);color:rgb(51 65 85);font-size:.7rem;font-weight:900}.dark .q{background:rgb(51 65 85);color:rgb(226 232 240)}
     .th{text-align:left;padding:.78rem 1rem;font-weight:900;white-space:nowrap}.td{padding:.9rem 1rem;vertical-align:top}.badge{display:inline-flex;align-items:center;border-radius:.7rem;padding:.2rem .55rem;background:rgb(241 245 249);font-size:.75rem;font-weight:900}.badge.ok{background:rgb(220 252 231);color:rgb(22 101 52)}.badge.bad{background:rgb(254 226 226);color:rgb(190 18 60)}.dark .badge{background:rgb(30 41 59)}.dark .badge.ok{background:rgba(16,185,129,.18);color:rgb(110 231 183)}.dark .badge.bad{background:rgba(244,63,94,.16);color:rgb(251 113 133)}
-    .btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid rgb(203 213 225);border-radius:.75rem;padding:.4rem .7rem;font-size:.78rem;font-weight:900}.dark .btn{border-color:rgb(51 65 85)}.btn.danger{color:rgb(225 29 72);border-color:rgb(253 164 175)}.line{display:flex;justify-content:space-between;gap:.75rem;border-bottom:1px solid rgb(231 229 228);padding:.58rem 0;font-size:.84rem}.dark .line{border-color:rgb(30 41 59)}
+    .btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid rgb(203 213 225);border-radius:.75rem;padding:.4rem .7rem;font-size:.78rem;font-weight:900}.dark .btn{border-color:rgb(51 65 85)}.btn.danger{color:rgb(225 29 72);border-color:rgb(253 164 175)}.line{display:flex;justify-content:space-between;gap:.75rem;border-bottom:1px solid rgb(231 229 228);padding:.58rem 0;font-size:.84rem}.dark .line{border-color:rgb(30 41 59)}.wrap{overflow-wrap:anywhere;word-break:break-word}.table-compact .td{padding:.75rem .8rem}.actions{display:flex;justify-content:flex-end;gap:.35rem;flex-wrap:wrap}
   </style>
 </head>
 <body x-cloak class="min-h-screen bg-[radial-gradient(circle_at_top_left,#d9f99d33,transparent_32%),linear-gradient(135deg,#f5f5f4,#ecfeff)] dark:bg-[radial-gradient(circle_at_top_left,#064e3b55,transparent_32%),linear-gradient(135deg,#020617,#0f172a)] text-slate-900 dark:text-slate-100">
@@ -87,25 +87,24 @@
             <div><h2 class="font-black text-lg">渠道池</h2><p class="text-xs text-slate-500 mt-1">同一个组里的多个渠道会自动轮询；如果一个渠道失败，会按路由顺序 fallback。</p></div>
             <div class="text-xs text-slate-500" x-text="'当前组：' + groupNames.join(' / ')"></div>
           </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+          <div class="overflow-x-auto md:overflow-visible">
+            <table class="w-full table-fixed text-sm table-compact">
               <thead class="bg-stone-50 dark:bg-slate-950 text-slate-500">
-                <tr><th class="th">渠道</th><th class="th">角色 / 组</th><th class="th">模型</th><th class="th">状态</th><th class="th text-right">操作</th></tr>
+                <tr><th class="th w-[30%]">渠道</th><th class="th w-[17%]">角色/组</th><th class="th w-[22%]">模型</th><th class="th w-[18%]">状态</th><th class="th w-[13%] text-right">操作</th></tr>
               </thead>
               <tbody class="divide-y divide-stone-100 dark:divide-slate-800">
                 <template x-for="ch in channels" :key="ch.id">
-                  <tr class="hover:bg-stone-50 dark:hover:bg-slate-950/60">
-                    <td class="td"><div class="font-bold" x-text="ch.name"></div><div class="text-xs text-slate-500 max-w-xs truncate" x-text="ch.base"></div><div class="text-xs text-slate-400 mt-1" x-text="typeLabel(ch.type)"></div></td>
-                    <td class="td"><span class="badge" x-text="ch.role||'default'"></span><span class="badge ml-1" x-text="ch.group||'未分组'"></span><div class="text-xs text-slate-500 mt-1" x-text="'优先级 ' + (ch.priority||100)"></div></td>
-                    <td class="td mono text-xs"><div x-text="ch.models||'*'"></div><div class="text-slate-500 truncate max-w-xs" x-text="ch.model_mapping||''"></div></td>
-                    <td class="td"><span :class="(ch.status==='active'||!ch.status)?'ok':'bad'" class="badge" x-text="ch.status||'active'"></span><div class="text-xs text-slate-500 mt-1" x-text="'请求 ' + (ch.requests||0) + ' / 失败 ' + (ch.fail_count||0)"></div><div class="text-xs text-slate-400 mt-1" x-text="ch.last_test?'测试 '+ch.last_test:''"></div></td>
-                    <td class="td text-right whitespace-nowrap"><button @click="testChannel(ch)" class="btn mr-1">测试</button><button @click="openEdit(ch)" class="btn mr-1">编辑</button><button @click="deleteChannel(ch.id)" class="btn danger">删除</button></td>
+                  <tr class="hover:bg-stone-50 dark:hover:bg-slate-950/60 align-top">
+                    <td class="td wrap"><div class="font-bold truncate" x-text="ch.name"></div><div class="text-xs text-slate-500 wrap" x-text="ch.base"></div><div class="text-xs text-slate-400 mt-1" x-text="typeLabel(ch.type)"></div></td>
+                    <td class="td"><div class="flex flex-wrap gap-1"><span class="badge" x-text="ch.role||'default'"></span><span class="badge" x-text="ch.group||'未分组'"></span></div><div class="text-xs text-slate-500 mt-1" x-text="'优先级 ' + (ch.priority||100)"></div></td>
+                    <td class="td mono text-xs wrap"><div x-text="ch.models||'*'"></div><button x-show="ch.model_mapping" @click="help('模型映射：' + ch.model_mapping)" class="mt-1 text-teal-700 dark:text-teal-300 font-bold">查看映射</button></td>
+                    <td class="td"><span :class="(ch.status==='active'||!ch.status)?'ok':'bad'" class="badge" x-text="ch.status||'active'"></span><div class="text-xs text-slate-500 mt-1" x-text="'请求 ' + (ch.requests||0) + ' / 失败 ' + (ch.fail_count||0)"></div><div class="text-xs text-slate-400 mt-1 wrap" x-text="ch.last_test?'测试 '+ch.last_test:''"></div></td>
+                    <td class="td"><div class="actions"><button @click="testChannel(ch)" class="btn">测试</button><button @click="openEdit(ch)" class="btn">编辑</button><button @click="deleteChannel(ch.id)" class="btn danger">删除</button></div></td>
                   </tr>
                 </template>
               </tbody>
             </table>
-          </div>
-        </section>
+          </div>        </section>
 
         <section class="panel p-4">
           <h2 class="font-black text-lg mb-3">最近调用</h2>
