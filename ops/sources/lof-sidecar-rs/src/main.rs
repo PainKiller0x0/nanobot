@@ -77,6 +77,7 @@ struct AppState {
     script_dir: PathBuf,
     state_file: PathBuf,
     dashboard_history_file: PathBuf,
+    inbox_dir: PathBuf,
     timeout_secs: u64,
     run_lock: Arc<Mutex<()>>,
     http: Client,
@@ -296,6 +297,10 @@ async fn main() {
     if let Some(parent) = dashboard_history_file.parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
+    let inbox_dir = std::env::var("NANOBOT_INBOX_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/root/.nanobot/data/knowledge-inbox"));
+    let _ = tokio::fs::create_dir_all(&inbox_dir).await;
 
     let http = Client::builder()
         .timeout(Duration::from_secs(30))
@@ -307,6 +312,7 @@ async fn main() {
         script_dir,
         state_file,
         dashboard_history_file,
+        inbox_dir,
         timeout_secs,
         run_lock: Arc::new(Mutex::new(())),
         http,
@@ -331,7 +337,9 @@ async fn main() {
         .route("/api/dashboard-history", get(api_dashboard_history))
         .route("/sidecars", get(sidecars_page))
         .route("/evolution", get(evolution_page))
+        .route("/inbox", get(inbox_page))
         .route("/api/sidecars", get(api_sidecars))
+        .route("/api/inbox", get(api_inbox))
         .route("/api/capabilities", get(api_capabilities))
         .route("/api/evolution", get(api_evolution))
         .route("/api/notify-jobs", get(api_notify_jobs))
@@ -387,6 +395,10 @@ async fn api_system() -> impl IntoResponse {
 
 async fn api_dashboard_history(State(state): State<AppState>) -> impl IntoResponse {
     Json(refresh_dashboard_history(&state).await)
+}
+
+async fn api_inbox(State(state): State<AppState>) -> impl IntoResponse {
+    Json(inbox_snapshot(&state.inbox_dir).await)
 }
 
 async fn refresh_dashboard_history(state: &AppState) -> serde_json::Value {
@@ -999,13 +1011,13 @@ async fn dashboard() -> Html<String> {
     <article class="panel card fade" style="animation-delay:.12s"><h2>&#x5b9a;&#x65f6;&#x4efb;&#x52a1;</h2><div class="metric" id="notifyMetrics"></div></article>
     <article class="panel card full fade" style="animation-delay:.13s"><h2>&#x4eca;&#x65e5;&#x6458;&#x8981;</h2><div id="todayBrief"></div></article>
     <article class="panel card wide fade" style="animation-delay:.14s"><h2>&#x9700;&#x8981;&#x4f60;&#x770b;</h2><div class="list" id="attention"></div></article>
-    <article class="panel card fade" style="animation-delay:.16s"><h2>&#x5feb;&#x901f;&#x5165;&#x53e3;</h2><div class="quick"><a href="/lof">LOF &#x96f7;&#x8fbe;<span>&#x4f30;&#x503c; / &#x6ea2;&#x4ef7; / &#x62a5;&#x544a;</span></a><a href="/rss/">RSS &#x6587;&#x7ae0;<span>&#x5fae;&#x4fe1; / &#x9e2d;&#x54e5; / Markdown</span></a><a href="/reflexio/">Reflexio<span>&#x8bb0;&#x5fc6;&#x4e0e;&#x53cd;&#x601d;</span></a><a href="/trends/">热点雷达<span>全网热榜 / MCP 工具 / 话题分析</span></a><a href="/sidecars">&#x670d;&#x52a1;&#x603b;&#x63a7;<span>&#x65e5;&#x5fd7; / &#x91cd;&#x542f;&#x547d;&#x4ee4;</span></a><a href="/evolution">进化日志<span>能力变化 / 性能证据 / 修复记录</span></a></div></article>
+    <article class="panel card fade" style="animation-delay:.16s"><h2>&#x5feb;&#x901f;&#x5165;&#x53e3;</h2><div class="quick"><a href="/lof">LOF &#x96f7;&#x8fbe;<span>&#x4f30;&#x503c; / &#x6ea2;&#x4ef7; / &#x62a5;&#x544a;</span></a><a href="/rss/">RSS &#x6587;&#x7ae0;<span>&#x5fae;&#x4fe1; / &#x9e2d;&#x54e5; / Markdown</span></a><a href="/reflexio/">Reflexio<span>&#x8bb0;&#x5fc6;&#x4e0e;&#x53cd;&#x601d;</span></a><a href="/trends/">热点雷达<span>全网热榜 / MCP 工具 / 话题分析</span></a><a href="/sidecars">&#x670d;&#x52a1;&#x603b;&#x63a7;<span>&#x65e5;&#x5fd7; / &#x91cd;&#x542f;&#x547d;&#x4ee4;</span></a><a href="/evolution">进化日志<span>能力变化 / 性能证据 / 修复记录</span></a><a href="/inbox">知识收件箱<span>待读材料 / Markdown 路径 / 决策评分</span></a></div></article>
     <article class="panel card wide fade" style="animation-delay:.18s"><h2>&#x6295;&#x8d44;&#x96f7;&#x8fbe;</h2><div id="lofRadar"></div></article>
     <article class="panel card fade" style="animation-delay:.20s"><h2>&#x4fe1;&#x606f;&#x96f7;&#x8fbe;</h2><div class="list" id="infoRadar"></div></article>
     <article class="panel card full fade" style="animation-delay:.21s"><h2>7 &#x5929;&#x5386;&#x53f2;</h2><div id="historyPanel"></div></article>
 
     <article class="panel card full fade" style="animation-delay:.215s"><h2>Nanobot 能力矩阵</h2><div class="quick">
-      <a href="#" onclick="return false">知识收件箱<span>QQ：收一下 + 链接 / 这个值得看吗 + 链接；按需抓取 Markdown，不常驻</span></a>
+      <a href="/inbox">知识收件箱<span>QQ：收一下 + 链接 / 这个值得看吗 + 链接；按需抓取 Markdown，不常驻</span></a>
       <a href="#" onclick="return false">决策助手<span>QQ：今天先看什么 / 今天怎么安排；聚合系统、文章、LOF、任务数据</span></a>
       <a href="/rss/">RSS 文章能力<span>微信、鸭哥、Markdown 预览、广告过滤，仍走 RSS sidecar</span></a>
       <a href="/trends/">热点雷达能力<span>全网热榜、搜索、话题趋势、MCP 风格工具接口，走 Trend sidecar</span></a>
@@ -1086,6 +1098,51 @@ updateClock();setInterval(updateClock,1000);loadAll();setInterval(()=>loadAll(fa
 </script>
 </body>
 </html>"##.to_string(),
+    )
+}
+
+async fn inbox_page() -> impl IntoResponse {
+    Html(
+        r##"<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>知识收件箱</title>
+<style>
+:root{--bg:#f7f0e4;--panel:#fffdf7;--text:#202019;--muted:#6f695d;--line:#e4dac8;--accent:#b96a33;--accent2:#287f73;--ok:#16844d;--warn:#b76a12;--bad:#c43d32;--shadow:0 22px 70px rgba(73,50,24,.14)}
+[data-theme="dark"]{--bg:#101816;--panel:#1b2621;--text:#edf5ea;--muted:#a8b5a4;--line:#304038;--accent:#efa35c;--accent2:#77c7b7;--ok:#76d39a;--warn:#f3c468;--bad:#ff8278;--shadow:0 22px 72px rgba(0,0,0,.36)}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--text);font-family:"Avenir Next","PingFang SC","Microsoft YaHei",sans-serif;background:radial-gradient(900px 520px at -8% -18%,rgba(185,106,51,.22),transparent 58%),radial-gradient(740px 460px at 108% 0,rgba(40,127,115,.18),transparent 55%),var(--bg)}.wrap{max-width:1120px;margin:0 auto;padding:26px 16px 42px}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:26px;box-shadow:var(--shadow);padding:22px}.eyebrow{color:var(--accent2);font-size:12px;font-weight:900;letter-spacing:.16em}.title{font-family:Georgia,"Noto Serif SC",serif;font-size:44px;line-height:1.04;margin:8px 0 10px;letter-spacing:-.04em}.sub{color:var(--muted);line-height:1.75;margin:0}.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.btn{border:1px solid var(--line);border-radius:999px;padding:10px 14px;background:var(--text);color:var(--bg);font-weight:900;text-decoration:none;cursor:pointer}.btn.secondary{background:transparent;color:var(--text)}.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat{border:1px solid var(--line);border-radius:18px;padding:14px;background:rgba(255,255,255,.16)}.k{font-size:12px;color:var(--muted);font-weight:800}.v{font-size:30px;font-weight:950;letter-spacing:-.04em}.grid{display:grid;gap:12px;margin-top:14px}.item{display:grid;grid-template-columns:72px 1fr auto;gap:14px;align-items:start;border:1px solid var(--line);border-radius:22px;padding:16px;background:rgba(255,255,255,.16)}.score{width:58px;height:58px;border-radius:18px;display:grid;place-items:center;font-weight:950;font-size:20px;border:1px solid var(--line);background:rgba(255,255,255,.20)}.score.ok{color:var(--ok)}.score.warn{color:var(--warn)}.score.bad{color:var(--bad)}.name{font-size:19px;font-weight:950;line-height:1.35}.name a{color:var(--text);text-decoration:none}.name a:hover{color:var(--accent2);text-decoration:underline}.meta{color:var(--muted);font-size:13px;line-height:1.6;margin-top:6px}.summary{margin-top:9px;color:var(--text);line-height:1.7}.tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.tag{border:1px solid var(--line);border-radius:999px;padding:4px 8px;color:var(--muted);font-size:12px}.path{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;color:var(--muted);max-width:280px;word-break:break-all}.empty{color:var(--muted);padding:24px}.mini{font-size:12px;color:var(--muted);line-height:1.5}.good{color:var(--ok)}.warnText{color:var(--warn)}.danger{color:var(--bad)}@media(max-width:820px){.hero{grid-template-columns:1fr}.title{font-size:34px}.item{grid-template-columns:1fr}.path{max-width:none}.stats{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section class="hero">
+    <div class="panel">
+      <div class="eyebrow">KNOWLEDGE INBOX</div>
+      <h1 class="title">知识收件箱</h1>
+      <p class="sub">QQ 里发“收一下 + 链接”会把网页抓成 Markdown；发“这个值得看吗 + 链接”会生成一个轻量决策包。这里负责查看最近收进来的材料，不新增常驻进程。</p>
+      <div class="toolbar"><a class="btn" href="/">回到驾驶舱</a><a class="btn secondary" href="/api/inbox" target="_blank">JSON</a><button class="btn secondary" onclick="loadAll()">刷新</button><button class="btn secondary" onclick="toggleTheme()">明暗</button></div>
+    </div>
+    <div class="panel"><div class="stats" id="stats"><div class="empty">加载中...</div></div><div class="mini" style="margin-top:12px">数据源：/root/.nanobot/data/knowledge-inbox/items.json</div></div>
+  </section>
+  <section class="grid" id="items"></section>
+</div>
+<script>
+const root=document.documentElement;if(localStorage.dashboardTheme==='dark'||localStorage.inboxTheme==='dark')root.setAttribute('data-theme','dark');
+function toggleTheme(){const d=root.getAttribute('data-theme')==='dark';root.setAttribute('data-theme',d?'light':'dark');localStorage.inboxTheme=d?'light':'dark'}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function stat(k,v,n=''){return `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="mini">${esc(n)}</div></div>`}
+function fmtTime(s){if(!s)return '-';try{return new Date(s).toLocaleString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'})}catch{return s}}
+function host(u){try{return new URL(u).host}catch{return '-'}}
+function cls(score){score=Number(score)||0;return score>=75?'ok':score>=58?'warn':'bad'}
+function label(item){return item.decision_label||((Number(item.decision_score)||0)>=75?'值得优先看':((Number(item.decision_score)||0)>=58?'可以稍后看':'扫一眼'))}
+function render(data){const s=data.summary||{};document.getElementById('stats').innerHTML=stat('总数',s.total??0,'历史收进来的网页')+stat('今天',s.today??0,'今天新增')+stat('优先读',s.priority??0,'评分 ≥ 75')+stat('可跳过',s.skipped??0,'评分 < 42');const items=data.items||[];document.getElementById('items').innerHTML=items.length?items.map(item=>{const score=Number(item.decision_score)||0;const url=item.final_url||item.url||'#';const tags=(item.keywords||[]).slice(0,6).map(t=>`<span class="tag">${esc(t)}</span>`).join('');return `<article class="item"><div class="score ${cls(score)}">${esc(score)}</div><div><div class="name"><a href="${esc(url)}" target="_blank" rel="noopener">${esc(item.title||'未命名网页')}</a></div><div class="meta">${esc(label(item))} · ${esc(host(url))} · ${fmtTime(item.captured_at)} · ${esc(item.content_chars||0)} 字</div><div class="summary">${esc(item.summary||item.description||'暂无摘要')}</div><div class="tags">${tags}</div></div><div class="path">${esc(item.markdown_path||'暂无 Markdown 路径')}</div></article>`}).join(''):'<div class="panel empty">收件箱还是空的。QQ 发“收一下 https://example.com”就能开始积累。</div>'}
+async function loadAll(){try{const r=await fetch('/api/inbox',{cache:'no-store'});render(await r.json())}catch(e){document.getElementById('items').innerHTML='<div class="panel empty danger">读取失败：'+esc(e.message)+'</div>'}}
+loadAll();
+</script>
+</body>
+</html>"##,
     )
 }
 
@@ -1336,6 +1393,64 @@ async fn capability_registry_snapshot(state: &AppState) -> CapabilityRegistryRes
         },
         items,
     }
+}
+
+async fn inbox_snapshot(inbox_dir: &Path) -> serde_json::Value {
+    let items_file = inbox_dir.join("items.json");
+    let raw = tokio::fs::read_to_string(&items_file)
+        .await
+        .unwrap_or_else(|_| "{}".to_string());
+    let parsed = serde_json::from_str::<serde_json::Value>(&raw).unwrap_or(serde_json::Value::Null);
+    let mut items: Vec<serde_json::Value> = match parsed {
+        serde_json::Value::Array(items) => items,
+        serde_json::Value::Object(map) => map.into_values().collect(),
+        _ => Vec::new(),
+    };
+    items.sort_by_key(|item| {
+        item.get("captured_at")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string()
+    });
+    items.reverse();
+    let today = shanghai_now().format("%Y-%m-%d").to_string();
+    let score_of = |item: &serde_json::Value| {
+        item.get("decision_score")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(0)
+    };
+    let total = items.len();
+    let priority = items.iter().filter(|item| score_of(item) >= 75).count();
+    let maybe = items
+        .iter()
+        .filter(|item| (58..75).contains(&score_of(item)))
+        .count();
+    let skipped = items.iter().filter(|item| score_of(item) < 42).count();
+    let today_count = items
+        .iter()
+        .filter(|item| {
+            item.get("captured_at")
+                .and_then(|value| value.as_str())
+                .is_some_and(|value| value.starts_with(&today))
+        })
+        .count();
+    if items.len() > 100 {
+        items.truncate(100);
+    }
+    serde_json::json!({
+        "ok": true,
+        "now": shanghai_now().format("%Y-%m-%d %H:%M:%S %:z").to_string(),
+        "data_file": items_file,
+        "markdown_dir": inbox_dir.join("markdown"),
+        "summary": {
+            "total": total,
+            "today": today_count,
+            "priority": priority,
+            "maybe": maybe,
+            "skipped": skipped,
+        },
+        "items": items,
+    })
 }
 
 async fn evolution_snapshot() -> serde_json::Value {

@@ -1,10 +1,46 @@
-from nanobot.agent import capability_reply, memory_reply
+from nanobot.agent import capability_reply, inbox_reply, memory_reply
 from nanobot.agent.direct_reply import build_direct_reply
 from nanobot.bus.events import InboundMessage
 
 
 def _msg(content: str) -> InboundMessage:
     return InboundMessage(channel="qq", sender_id="user", chat_id="chat", content=content)
+
+
+def test_knowledge_inbox_capture_uses_skill_without_llm(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(args, *, user_id=None):
+        calls.append((args, user_id))
+        return "📥 已入收件箱：Example"
+
+    monkeypatch.setattr(inbox_reply, "_run_tool", fake_run)
+
+    out = build_direct_reply(_msg("收一下 https://example.com/a"), model="test-model", start_time=0)
+
+    assert out is not None
+    assert "已入收件箱" in out.content
+    assert "未调用 LLM" in out.content
+    assert "8093/inbox" in out.content
+    assert calls == [(["capture", "https://example.com/a"], "user")]
+    assert out.metadata["_direct_reply"] is True
+
+
+def test_knowledge_inbox_decide_uses_skill_without_llm(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(args, *, user_id=None):
+        calls.append((args, user_id))
+        return "🧠 决策包：Example"
+
+    monkeypatch.setattr(inbox_reply, "_run_tool", fake_run)
+
+    out = build_direct_reply(_msg("这个值得看吗 https://example.com/a"), model="test-model", start_time=0)
+
+    assert out is not None
+    assert "决策包" in out.content
+    assert calls[0][0][:2] == ["decide", "https://example.com/a"]
+    assert "--question" in calls[0][0]
 
 
 def test_memory_query_returns_direct_reply_without_llm() -> None:
