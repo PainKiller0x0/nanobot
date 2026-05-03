@@ -44,22 +44,46 @@ struct Attempt {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProxyProtocol {
+enum ApiProtocol {
     OpenAI,
     Anthropic,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UpstreamProtocol {
-    OpenAI,
-    Anthropic,
-}
+impl ApiProtocol {
+    fn from_channel(ch: &Channel) -> Option<Self> {
+        match ch.r#type.trim().to_lowercase().as_str() {
+            "" | "openai" | "openai-compatible" => Some(Self::OpenAI),
+            "anthropic" | "anthropic-api" => Some(Self::Anthropic),
+            _ => None,
+        }
+    }
 
-impl From<UpstreamProtocol> for ProxyProtocol {
-    fn from(value: UpstreamProtocol) -> Self {
-        match value {
-            UpstreamProtocol::OpenAI => ProxyProtocol::OpenAI,
-            UpstreamProtocol::Anthropic => ProxyProtocol::Anthropic,
+    fn channel_match_rank(ch: &Channel, client_protocol: Self) -> u8 {
+        match Self::from_channel(ch) {
+            Some(upstream) if upstream == client_protocol => 0,
+            Some(_) => 1,
+            None => 2,
+        }
+    }
+
+    fn target_url(self, base: &str) -> String {
+        match self {
+            Self::OpenAI => openai_chat_url(base),
+            Self::Anthropic => anthropic_messages_url(base),
+        }
+    }
+
+    fn apply_channel_auth(self, req: RequestBuilder, channel: &Channel) -> RequestBuilder {
+        match self {
+            Self::OpenAI => req.header("Authorization", format!("Bearer {}", channel.key)),
+            Self::Anthropic => {
+                if channel.base.to_lowercase().contains("anthropic.com") {
+                    req.header("x-api-key", &channel.key)
+                        .header("anthropic-version", "2023-06-01")
+                } else {
+                    req.header("Authorization", format!("Bearer {}", channel.key))
+                }
+            }
         }
     }
 }
@@ -68,20 +92,20 @@ pub async fn handle_openai_proxy(
     State(state): State<Arc<ProxyState>>,
     req: Request<Body>,
 ) -> Response<Body> {
-    handle_proxy(State(state), req, ProxyProtocol::OpenAI).await
+    handle_proxy(State(state), req, ApiProtocol::OpenAI).await
 }
 
 pub async fn handle_anthropic_proxy(
     State(state): State<Arc<ProxyState>>,
     req: Request<Body>,
 ) -> Response<Body> {
-    handle_proxy(State(state), req, ProxyProtocol::Anthropic).await
+    handle_proxy(State(state), req, ApiProtocol::Anthropic).await
 }
 
 async fn handle_proxy(
     State(state): State<Arc<ProxyState>>,
     req: Request<Body>,
-    protocol: ProxyProtocol,
+    protocol: ApiProtocol,
 ) -> Response<Body> {
     let started = Instant::now();
     let (parts, body) = req.into_parts();
@@ -145,13 +169,13 @@ async fn handle_proxy(
     let retry_statuses = router.retry_statuses.clone();
     let mut last_error: Option<Response<Body>> = None;
     for (attempt_idx, attempt) in attempts.iter().enumerate() {
-        let Some(upstream_protocol) = upstream_protocol(&attempt.channel) else {
+        let Some(upstream_protocol) = ApiProtocol::from_channel(&attempt.channel) else {
             continue;
         };
-        if stream && protocol != upstream_protocol.into() {
+        if stream && protocol != upstream_protocol {
             continue;
         }
-        let target_url = target_url(&attempt.channel.base, upstream_protocol);
+        let target_url = upstream_protocol.target_url(&attempt.channel.base);
         let attempt_body = rewrite_body_for_upstream(
             &body_bytes,
             &attempt.actual_model,
@@ -172,7 +196,7 @@ async fn handle_proxy(
                 target_req = target_req.header(name, value);
             }
         }
-        target_req = apply_channel_auth(target_req, &attempt.channel, upstream_protocol);
+        target_req = upstream_protocol.apply_channel_auth(target_req, &attempt.channel);
 
         let response = match target_req.send().await {
             Ok(res) => res,
@@ -271,7 +295,7 @@ async fn handle_proxy(
         )
         .await;
 
-        let mut res_builder = if protocol == upstream_protocol.into() {
+        let mut res_builder = if protocol == upstream_protocol {
             response_with_headers(status, &headers)
         } else {
             Response::builder()
@@ -552,7 +576,7 @@ async fn build_attempts(
     channels: &[Channel],
     router: &RouterConfig,
     decision: &RouteDecision,
-    protocol: ProxyProtocol,
+    protocol: ApiProtocol,
 ) -> Vec<Attempt> {
     let mut specs = Vec::new();
     add_role_attempts(
@@ -587,7 +611,7 @@ async fn build_attempts(
         let mut candidates: Vec<Channel> = channels
             .iter()
             .filter(|ch| ch.is_active())
-            .filter(|ch| upstream_protocol(ch).is_some())
+            .filter(|ch| ApiProtocol::from_channel(ch).is_some())
             .filter(|ch| spec.role == "any" || ch.role_key() == spec.role)
             .filter(|ch| spec.group.is_empty() || ch.group_key() == spec.group)
             .filter(|ch| {
@@ -598,7 +622,7 @@ async fn build_attempts(
             .collect();
         candidates.sort_by_key(|ch| {
             (
-                protocol_match_rank(ch, protocol),
+                ApiProtocol::channel_match_rank(ch, protocol),
                 ch.priority,
                 ch.group_key(),
                 ch.name.clone(),
@@ -632,23 +656,6 @@ async fn build_attempts(
         }
     }
     attempts
-}
-
-fn upstream_protocol(ch: &Channel) -> Option<UpstreamProtocol> {
-    let ty = ch.r#type.trim().to_lowercase();
-    match ty.as_str() {
-        "" | "openai" | "openai-compatible" => Some(UpstreamProtocol::OpenAI),
-        "anthropic" | "anthropic-api" => Some(UpstreamProtocol::Anthropic),
-        _ => None,
-    }
-}
-
-fn protocol_match_rank(ch: &Channel, client_protocol: ProxyProtocol) -> u8 {
-    match upstream_protocol(ch) {
-        Some(upstream) if ProxyProtocol::from(upstream) == client_protocol => 0,
-        Some(_) => 1,
-        None => 2,
-    }
 }
 
 fn fallback_roles(role: &str) -> &'static [&'static str] {
@@ -737,18 +744,14 @@ fn rewrite_model(body: &[u8], model: &str) -> Vec<u8> {
 fn rewrite_body_for_upstream(
     body: &[u8],
     model: &str,
-    client_protocol: ProxyProtocol,
-    upstream_protocol: UpstreamProtocol,
+    client_protocol: ApiProtocol,
+    upstream_protocol: ApiProtocol,
 ) -> Vec<u8> {
     match (client_protocol, upstream_protocol) {
-        (ProxyProtocol::OpenAI, UpstreamProtocol::OpenAI)
-        | (ProxyProtocol::Anthropic, UpstreamProtocol::Anthropic) => rewrite_model(body, model),
-        (ProxyProtocol::Anthropic, UpstreamProtocol::OpenAI) => {
-            anthropic_request_to_openai(body, model)
-        }
-        (ProxyProtocol::OpenAI, UpstreamProtocol::Anthropic) => {
-            openai_request_to_anthropic(body, model)
-        }
+        (ApiProtocol::OpenAI, ApiProtocol::OpenAI)
+        | (ApiProtocol::Anthropic, ApiProtocol::Anthropic) => rewrite_model(body, model),
+        (ApiProtocol::Anthropic, ApiProtocol::OpenAI) => anthropic_request_to_openai(body, model),
+        (ApiProtocol::OpenAI, ApiProtocol::Anthropic) => openai_request_to_anthropic(body, model),
     }
 }
 
@@ -775,12 +778,18 @@ fn anthropic_request_to_openai(body: &[u8], model: &str) -> Vec<u8> {
         "model": model,
         "messages": messages,
     });
-    copy_json_field(&value, &mut out, "max_tokens", "max_tokens");
-    copy_json_field(&value, &mut out, "temperature", "temperature");
-    copy_json_field(&value, &mut out, "top_p", "top_p");
-    copy_json_field(&value, &mut out, "stream", "stream");
-    copy_json_field(&value, &mut out, "stop_sequences", "stop");
-    serde_json::to_vec(&out).unwrap_or_else(|_| rewrite_model(body, model))
+    copy_json_fields(
+        &value,
+        &mut out,
+        &[
+            ("max_tokens", "max_tokens"),
+            ("temperature", "temperature"),
+            ("top_p", "top_p"),
+            ("stream", "stream"),
+            ("stop_sequences", "stop"),
+        ],
+    );
+    json_bytes_or(&out, rewrite_model(body, model))
 }
 
 fn openai_request_to_anthropic(body: &[u8], model: &str) -> Vec<u8> {
@@ -820,19 +829,32 @@ fn openai_request_to_anthropic(body: &[u8], model: &str) -> Vec<u8> {
     if !system_parts.is_empty() {
         out["system"] = Value::String(system_parts.join("\n\n"));
     }
-    copy_json_field(&value, &mut out, "temperature", "temperature");
-    copy_json_field(&value, &mut out, "top_p", "top_p");
-    copy_json_field(&value, &mut out, "stream", "stream");
-    copy_json_field(&value, &mut out, "stop", "stop_sequences");
-    serde_json::to_vec(&out).unwrap_or_else(|_| rewrite_model(body, model))
+    copy_json_fields(
+        &value,
+        &mut out,
+        &[
+            ("temperature", "temperature"),
+            ("top_p", "top_p"),
+            ("stream", "stream"),
+            ("stop", "stop_sequences"),
+        ],
+    );
+    json_bytes_or(&out, rewrite_model(body, model))
 }
 
-fn copy_json_field(from: &Value, to: &mut Value, src: &str, dst: &str) {
-    if let Some(value) = from.get(src) {
-        if let Some(obj) = to.as_object_mut() {
-            obj.insert(dst.to_string(), value.clone());
+fn copy_json_fields(from: &Value, to: &mut Value, fields: &[(&str, &str)]) {
+    let Some(obj) = to.as_object_mut() else {
+        return;
+    };
+    for (src, dst) in fields {
+        if let Some(value) = from.get(*src) {
+            obj.insert((*dst).to_string(), value.clone());
         }
     }
+}
+
+fn json_bytes_or(value: &Value, fallback: Vec<u8>) -> Vec<u8> {
+    serde_json::to_vec(value).unwrap_or(fallback)
 }
 
 fn content_to_text(value: &Value) -> String {
@@ -867,15 +889,15 @@ fn content_to_text(value: &Value) -> String {
 fn rewrite_response_for_client(
     body: &[u8],
     status: StatusCode,
-    client_protocol: ProxyProtocol,
-    upstream_protocol: UpstreamProtocol,
+    client_protocol: ApiProtocol,
+    upstream_protocol: ApiProtocol,
 ) -> Vec<u8> {
-    if client_protocol == upstream_protocol.into() || !status.is_success() {
+    if client_protocol == upstream_protocol || !status.is_success() {
         return body.to_vec();
     }
     match (client_protocol, upstream_protocol) {
-        (ProxyProtocol::Anthropic, UpstreamProtocol::OpenAI) => openai_response_to_anthropic(body),
-        (ProxyProtocol::OpenAI, UpstreamProtocol::Anthropic) => anthropic_response_to_openai(body),
+        (ApiProtocol::Anthropic, ApiProtocol::OpenAI) => openai_response_to_anthropic(body),
+        (ApiProtocol::OpenAI, ApiProtocol::Anthropic) => anthropic_response_to_openai(body),
         _ => body.to_vec(),
     }
 }
@@ -919,7 +941,11 @@ fn openai_response_to_anthropic(body: &[u8]) -> Vec<u8> {
         "role": "assistant",
         "model": value.get("model").cloned().unwrap_or_else(|| Value::String("unknown".to_string())),
         "content": content,
-        "stop_reason": openai_finish_to_anthropic(choice.and_then(|item| item.get("finish_reason")).and_then(Value::as_str)),
+        "stop_reason": mapped_reason(
+            choice.and_then(|item| item.get("finish_reason")).and_then(Value::as_str),
+            &[("length", "max_tokens"), ("tool_calls", "tool_use")],
+            "end_turn",
+        ),
         "usage": {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
@@ -927,7 +953,7 @@ fn openai_response_to_anthropic(body: &[u8]) -> Vec<u8> {
             "cache_read_input_tokens": cache_read_input_tokens,
         }
     });
-    serde_json::to_vec(&out).unwrap_or_else(|_| body.to_vec())
+    json_bytes_or(&out, body.to_vec())
 }
 
 fn anthropic_response_to_openai(body: &[u8]) -> Vec<u8> {
@@ -958,7 +984,11 @@ fn anthropic_response_to_openai(body: &[u8]) -> Vec<u8> {
         "choices": [{
             "index": 0,
             "message": {"role": "assistant", "content": content},
-            "finish_reason": anthropic_stop_to_openai(value.get("stop_reason").and_then(Value::as_str)),
+            "finish_reason": mapped_reason(
+                value.get("stop_reason").and_then(Value::as_str),
+                &[("max_tokens", "length"), ("tool_use", "tool_calls")],
+                "stop",
+            ),
         }],
         "usage": {
             "prompt_tokens": prompt_tokens,
@@ -967,7 +997,7 @@ fn anthropic_response_to_openai(body: &[u8]) -> Vec<u8> {
             "prompt_tokens_details": {"cached_tokens": cached_tokens},
         }
     });
-    serde_json::to_vec(&out).unwrap_or_else(|_| body.to_vec())
+    json_bytes_or(&out, body.to_vec())
 }
 
 fn first_u64_in_value(value: &Value, paths: &[&[&str]]) -> u64 {
@@ -987,25 +1017,13 @@ fn first_u64_in_value(value: &Value, paths: &[&[&str]]) -> u64 {
     0
 }
 
-fn openai_finish_to_anthropic(reason: Option<&str>) -> Value {
+fn mapped_reason(reason: Option<&str>, mappings: &[(&str, &str)], default: &str) -> Value {
     Value::String(
-        match reason.unwrap_or("stop") {
-            "length" => "max_tokens",
-            "tool_calls" => "tool_use",
-            _ => "end_turn",
-        }
-        .to_string(),
-    )
-}
-
-fn anthropic_stop_to_openai(reason: Option<&str>) -> Value {
-    Value::String(
-        match reason.unwrap_or("end_turn") {
-            "max_tokens" => "length",
-            "tool_use" => "tool_calls",
-            _ => "stop",
-        }
-        .to_string(),
+        mappings
+            .iter()
+            .find_map(|(from, to)| (reason == Some(*from)).then_some(*to))
+            .unwrap_or(default)
+            .to_string(),
     )
 }
 
@@ -1016,50 +1034,22 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn target_url(base: &str, protocol: UpstreamProtocol) -> String {
-    match protocol {
-        UpstreamProtocol::OpenAI => openai_chat_url(base),
-        UpstreamProtocol::Anthropic => anthropic_messages_url(base),
-    }
-}
-
 fn openai_chat_url(base: &str) -> String {
-    let base = base.trim_end_matches('/');
-    if base.ends_with("/chat/completions") {
-        base.to_string()
-    } else if base.ends_with("/v1") {
-        format!("{}/chat/completions", base)
-    } else {
-        format!("{}/v1/chat/completions", base)
-    }
+    endpoint_url(base, "chat/completions")
 }
 
 fn anthropic_messages_url(base: &str) -> String {
-    let base = base.trim_end_matches('/');
-    if base.ends_with("/messages") {
-        base.to_string()
-    } else if base.ends_with("/v1") {
-        format!("{}/messages", base)
-    } else {
-        format!("{}/v1/messages", base)
-    }
+    endpoint_url(base, "messages")
 }
 
-fn apply_channel_auth(
-    req: RequestBuilder,
-    channel: &Channel,
-    protocol: UpstreamProtocol,
-) -> RequestBuilder {
-    match protocol {
-        UpstreamProtocol::OpenAI => req.header("Authorization", format!("Bearer {}", channel.key)),
-        UpstreamProtocol::Anthropic => {
-            if channel.base.to_lowercase().contains("anthropic.com") {
-                req.header("x-api-key", &channel.key)
-                    .header("anthropic-version", "2023-06-01")
-            } else {
-                req.header("Authorization", format!("Bearer {}", channel.key))
-            }
-        }
+fn endpoint_url(base: &str, endpoint: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if base.ends_with(endpoint) {
+        base.to_string()
+    } else if base.ends_with("/v1") {
+        format!("{}/{}", base, endpoint)
+    } else {
+        format!("{}/v1/{}", base, endpoint)
     }
 }
 
