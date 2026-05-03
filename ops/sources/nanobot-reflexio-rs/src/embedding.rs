@@ -1,3 +1,4 @@
+use crate::cost_policy::{embedding_enabled, FREE_EMBEDDING_ENDPOINT, FREE_EMBEDDING_MODEL};
 use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -29,13 +30,10 @@ pub struct EmbeddingService {
 impl EmbeddingService {
     pub fn new(api_key: String) -> Self {
         let endpoint = std::env::var("EMBEDDING_ENDPOINT")
-            .unwrap_or_else(|_| "https://api.siliconflow.cn/v1/embeddings".to_string());
-        let model = std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| "BAAI/bge-m3".to_string());
-        let allow_paid = env_bool("REFLEXIO_ALLOW_PAID_EMBEDDING", false);
-        let enabled_by_env = env_bool("REFLEXIO_EMBEDDING_ENABLED", true);
-        let enabled = enabled_by_env
-            && !api_key.trim().is_empty()
-            && (allow_paid || is_free_embedding(&endpoint, &model));
+            .unwrap_or_else(|_| FREE_EMBEDDING_ENDPOINT.to_string());
+        let model =
+            std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| FREE_EMBEDDING_MODEL.to_string());
+        let enabled = embedding_enabled(&api_key, &endpoint, &model);
         Self {
             client: Client::new(),
             api_key,
@@ -82,20 +80,6 @@ impl EmbeddingService {
         let vecs = self.embed(&[text.to_string()]).await?;
         Ok(vecs.into_iter().next().unwrap_or_default())
     }
-}
-
-fn env_bool(name: &str, default: bool) -> bool {
-    match std::env::var(name) {
-        Ok(v) => matches!(
-            v.trim().to_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        ),
-        Err(_) => default,
-    }
-}
-
-fn is_free_embedding(endpoint: &str, model: &str) -> bool {
-    endpoint.to_lowercase().contains("siliconflow") && model.to_lowercase().contains("bge")
 }
 
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {

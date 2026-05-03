@@ -1,3 +1,4 @@
+mod cost_policy;
 mod embedding;
 mod provider;
 mod reasoning;
@@ -17,6 +18,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use crate::cost_policy::{llm_enabled, FREE_LLM_BASE_URL, FREE_LLM_MODEL};
 use crate::embedding::{EmbeddingService, SearchResult};
 use crate::provider::{ChatMessage, LlmProvider};
 use crate::storage::DbStore;
@@ -110,21 +112,6 @@ fn default_threshold() -> f32 {
     0.3
 }
 
-fn env_bool(name: &str, default: bool) -> bool {
-    match env::var(name) {
-        Ok(v) => matches!(
-            v.trim().to_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        ),
-        Err(_) => default,
-    }
-}
-
-fn is_free_llm(base_url: &str, model: &str) -> bool {
-    base_url.to_lowercase().contains("longcat")
-        && model.to_lowercase().contains("longcat-flash-lite")
-}
-
 #[derive(Debug, Serialize)]
 struct SearchResponse {
     results: Vec<SearchResult>,
@@ -138,13 +125,9 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let api_key = env::var("LLM_API_KEY").unwrap_or_default();
-    let base_url = env::var("LLM_BASE_URL")
-        .unwrap_or_else(|_| "https://api.longcat.chat/openai/v1".to_string());
-    let llm_model = env::var("LLM_MODEL").unwrap_or_else(|_| "LongCat-Flash-Lite".to_string());
-    let allow_paid_llm = env_bool("REFLEXIO_ALLOW_PAID_LLM", false);
-    let llm_facts_enabled = env_bool("REFLEXIO_LLM_FACTS_ENABLED", true)
-        && !api_key.trim().is_empty()
-        && (allow_paid_llm || is_free_llm(&base_url, &llm_model));
+    let base_url = env::var("LLM_BASE_URL").unwrap_or_else(|_| FREE_LLM_BASE_URL.to_string());
+    let llm_model = env::var("LLM_MODEL").unwrap_or_else(|_| FREE_LLM_MODEL.to_string());
+    let llm_facts_enabled = llm_enabled(&api_key, &base_url, &llm_model);
     let db_path = env::var("DATABASE_URL").unwrap_or_else(|_| "reflexio.db".to_string());
     if let Some(parent) = Path::new(&db_path).parent() {
         let _ = std::fs::create_dir_all(parent);

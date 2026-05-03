@@ -96,6 +96,12 @@ fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
 
+const LLM_COST_POLICY: &str = "free_only";
+const LLM_AD_ROUTE_ON: &str = "free_longcat";
+const LLM_AD_ROUTE_OFF: &str = "off";
+const FREE_LLM_ERROR: &str =
+    "RSS sidecar only allows free LongCat-Flash-Lite for automatic LLM checks";
+
 #[derive(Clone, Default)]
 struct LlmSettings {
     enabled: bool,
@@ -119,6 +125,63 @@ impl LlmSettings {
 
     fn enabled(&self) -> bool {
         self.enabled && self.configured() && self.free_allowed()
+    }
+
+    fn with_payload(mut self, payload: &Value, preserve_masked_key: bool) -> Self {
+        if let Some(v) = payload.get("enabled").and_then(|v| v.as_bool()) {
+            self.enabled = v;
+        }
+        if let Some(v) = payload.get("api_base").and_then(|v| v.as_str()) {
+            self.api_base = v.trim().to_string();
+        }
+        if let Some(v) = payload.get("api_key").and_then(|v| v.as_str()) {
+            let incoming = v.trim();
+            if !preserve_masked_key || (!incoming.is_empty() && !is_masked_secret(incoming)) {
+                self.api_key = incoming.to_string();
+            }
+        }
+        if let Some(v) = payload.get("model").and_then(|v| v.as_str()) {
+            self.model = v.trim().to_string();
+        }
+        self
+    }
+
+    fn public_json(&self) -> Value {
+        json!({
+            "enabled": self.enabled,
+            "api_base": self.api_base,
+            "api_key": masked_secret(&self.api_key),
+            "api_key_present": !self.api_key.trim().is_empty(),
+            "model": self.model,
+            "cost_policy": LLM_COST_POLICY,
+            "auto_active": self.enabled(),
+        })
+    }
+
+    fn stored_json(&self) -> Value {
+        json!({
+            "enabled": self.enabled,
+            "api_base": self.api_base,
+            "api_key": self.api_key,
+            "model": self.model,
+            "cost_policy": LLM_COST_POLICY,
+        })
+    }
+
+    fn chat_completions_url(&self) -> String {
+        let mut url = self.api_base.trim_end_matches('/').to_string();
+        if !url.ends_with("/chat/completions") {
+            url.push_str("/chat/completions");
+        }
+        url
+    }
+
+    fn ad_route_note(&self) -> &'static str {
+        if self.enabled() {
+            LLM_AD_ROUTE_ON
+        } else {
+            LLM_AD_ROUTE_OFF
+        }
     }
 }
 
@@ -934,10 +997,7 @@ async fn refresh_one(
                 now,
                 seen,
                 saved,
-                format!(
-                    "max_age_days={days};ad_skipped={ad_skipped};llm_ad={}",
-                    if llm.enabled() { "free_longcat" } else { "off" }
-                ),
+                format!("max_age_days={days};ad_skipped={ad_skipped};llm_ad={}", llm.ad_route_note()),
                 run_id
             ],
         )
@@ -1316,15 +1376,7 @@ async fn list_runs(State(st): State<Arc<AppState>>, Query(q): Query<ListQuery>) 
 
 async fn get_settings_llm(State(st): State<Arc<AppState>>) -> Json<Value> {
     let llm = load_llm_settings_compat(&st.settings_path);
-    Json(json!({"item": {
-        "enabled": llm.enabled,
-        "api_base": llm.api_base,
-        "api_key": masked_secret(&llm.api_key),
-        "api_key_present": !llm.api_key.trim().is_empty(),
-        "model": llm.model,
-        "cost_policy": "free_only",
-        "auto_active": llm.enabled()
-    }}))
+    Json(json!({"item": llm.public_json()}))
 }
 
 async fn get_article(State(st): State<Arc<AppState>>, Path(id): Path<i64>) -> Json<Value> {
@@ -1592,75 +1644,31 @@ async fn set_llm_settings(
     State(st): State<Arc<AppState>>,
     Json(payload): Json<Value>,
 ) -> Json<Value> {
-    let enabled = payload
-        .get("enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let api_base = payload
-        .get("api_base")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    let incoming_api_key = payload
-        .get("api_key")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    let model = payload
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let llm = load_llm_settings_compat(&st.settings_path).with_payload(&payload, true);
     let mut settings = read_settings(&st.settings_path);
-    let existing = load_llm_settings_compat(&st.settings_path);
-    let api_key = if incoming_api_key.is_empty() || is_masked_secret(&incoming_api_key) {
-        existing.api_key
-    } else {
-        incoming_api_key
-    };
-    settings["llm_enabled"] = json!(enabled);
-    settings["api_base"] = json!(api_base.clone());
-    settings["api_key"] = json!(api_key.clone());
-    settings["model"] = json!(model.clone());
-    settings["llm"] = json!({"enabled": enabled, "api_base": api_base, "api_key": api_key, "model": model, "cost_policy": "free_only"});
+    settings["llm_enabled"] = json!(llm.enabled);
+    settings["api_base"] = json!(llm.api_base.clone());
+    settings["api_key"] = json!(llm.api_key.clone());
+    settings["model"] = json!(llm.model.clone());
+    settings["llm"] = llm.stored_json();
     if let Err(e) = write_settings(&st.settings_path, &settings) {
         return Json(json!({"error":e}));
     }
-    Json(json!({"message":"LLM settings saved","item":settings["llm"]}))
+    Json(json!({"message":"LLM settings saved","item": llm.public_json()}))
 }
 
 async fn test_llm_settings(
     State(st): State<Arc<AppState>>,
     Json(payload): Json<Value>,
 ) -> Json<Value> {
-    let mut llm = load_llm_settings_compat(&st.settings_path);
-    if let Some(v) = payload.get("api_base").and_then(|v| v.as_str()) {
-        llm.api_base = v.trim().to_string();
-    }
-    if let Some(v) = payload.get("api_key").and_then(|v| v.as_str()) {
-        let incoming = v.trim();
-        if !incoming.is_empty() && !is_masked_secret(incoming) {
-            llm.api_key = incoming.to_string();
-        }
-    }
-    if let Some(v) = payload.get("model").and_then(|v| v.as_str()) {
-        llm.model = v.trim().to_string();
-    }
+    let llm = load_llm_settings_compat(&st.settings_path).with_payload(&payload, true);
     if !llm.configured() {
         return Json(json!({"error":"Please provide API Base, API Key, and Model"}));
     }
     if !llm.free_allowed() {
-        return Json(
-            json!({"error":"RSS sidecar only allows free LongCat-Flash-Lite for automatic LLM checks"}),
-        );
+        return Json(json!({"error": FREE_LLM_ERROR}));
     }
-    let mut url = llm.api_base.trim_end_matches('/').to_string();
-    if !url.ends_with("/chat/completions") {
-        url.push_str("/chat/completions");
-    }
+    let url = llm.chat_completions_url();
     let body = json!({
         "model": llm.model,
         "messages":[{"role":"user","content":"Reply with OK only."}],
