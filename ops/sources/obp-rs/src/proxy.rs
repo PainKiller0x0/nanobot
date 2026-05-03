@@ -9,7 +9,7 @@ use axum::{
 use reqwest::{Body as ReqBody, Client, RequestBuilder};
 use serde_json::Value;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
@@ -47,6 +47,21 @@ struct Attempt {
 enum ProxyProtocol {
     OpenAI,
     Anthropic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpstreamProtocol {
+    OpenAI,
+    Anthropic,
+}
+
+impl From<UpstreamProtocol> for ProxyProtocol {
+    fn from(value: UpstreamProtocol) -> Self {
+        match value {
+            UpstreamProtocol::OpenAI => ProxyProtocol::OpenAI,
+            UpstreamProtocol::Anthropic => ProxyProtocol::Anthropic,
+        }
+    }
 }
 
 pub async fn handle_openai_proxy(
@@ -130,8 +145,19 @@ async fn handle_proxy(
     let retry_statuses = router.retry_statuses.clone();
     let mut last_error: Option<Response<Body>> = None;
     for (attempt_idx, attempt) in attempts.iter().enumerate() {
-        let target_url = target_url(&attempt.channel.base, protocol);
-        let attempt_body = rewrite_model(&body_bytes, &attempt.actual_model);
+        let Some(upstream_protocol) = upstream_protocol(&attempt.channel) else {
+            continue;
+        };
+        if stream && protocol != upstream_protocol.into() {
+            continue;
+        }
+        let target_url = target_url(&attempt.channel.base, upstream_protocol);
+        let attempt_body = rewrite_body_for_upstream(
+            &body_bytes,
+            &attempt.actual_model,
+            protocol,
+            upstream_protocol,
+        );
         let mut target_req = state
             .client
             .post(&target_url)
@@ -146,7 +172,7 @@ async fn handle_proxy(
                 target_req = target_req.header(name, value);
             }
         }
-        target_req = apply_channel_auth(target_req, &attempt.channel, protocol);
+        target_req = apply_channel_auth(target_req, &attempt.channel, upstream_protocol);
 
         let response = match target_req.send().await {
             Ok(res) => res,
@@ -229,6 +255,8 @@ async fn handle_proxy(
                 continue;
             }
         };
+        let response_bytes =
+            rewrite_response_for_client(&response_bytes, status, protocol, upstream_protocol);
         let usage = TokenUsage::from_response_bytes(&response_bytes);
         record_result(
             &state,
@@ -243,7 +271,13 @@ async fn handle_proxy(
         )
         .await;
 
-        let mut res_builder = response_with_headers(status, &headers);
+        let mut res_builder = if protocol == upstream_protocol.into() {
+            response_with_headers(status, &headers)
+        } else {
+            Response::builder()
+                .status(status)
+                .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
+        };
         res_builder = route_headers(res_builder, attempt, &decision);
         let response = res_builder
             .body(Body::from(response_bytes.clone()))
@@ -553,7 +587,7 @@ async fn build_attempts(
         let mut candidates: Vec<Channel> = channels
             .iter()
             .filter(|ch| ch.is_active())
-            .filter(|ch| channel_supports_protocol(ch, protocol))
+            .filter(|ch| upstream_protocol(ch).is_some())
             .filter(|ch| spec.role == "any" || ch.role_key() == spec.role)
             .filter(|ch| spec.group.is_empty() || ch.group_key() == spec.group)
             .filter(|ch| {
@@ -562,7 +596,14 @@ async fn build_attempts(
             })
             .cloned()
             .collect();
-        candidates.sort_by_key(|ch| (ch.priority, ch.group_key(), ch.name.clone()));
+        candidates.sort_by_key(|ch| {
+            (
+                protocol_match_rank(ch, protocol),
+                ch.priority,
+                ch.group_key(),
+                ch.name.clone(),
+            )
+        });
         rotate_candidates(state, &mut candidates).await;
         for ch in candidates {
             let actual = ch.mapped_model(&decision.requested_model, &spec.desired_model);
@@ -593,11 +634,20 @@ async fn build_attempts(
     attempts
 }
 
-fn channel_supports_protocol(ch: &Channel, protocol: ProxyProtocol) -> bool {
+fn upstream_protocol(ch: &Channel) -> Option<UpstreamProtocol> {
     let ty = ch.r#type.trim().to_lowercase();
-    match protocol {
-        ProxyProtocol::OpenAI => ty.is_empty() || ty == "openai" || ty == "openai-compatible",
-        ProxyProtocol::Anthropic => ty == "anthropic" || ty == "anthropic-api",
+    match ty.as_str() {
+        "" | "openai" | "openai-compatible" => Some(UpstreamProtocol::OpenAI),
+        "anthropic" | "anthropic-api" => Some(UpstreamProtocol::Anthropic),
+        _ => None,
+    }
+}
+
+fn protocol_match_rank(ch: &Channel, client_protocol: ProxyProtocol) -> u8 {
+    match upstream_protocol(ch) {
+        Some(upstream) if ProxyProtocol::from(upstream) == client_protocol => 0,
+        Some(_) => 1,
+        None => 2,
     }
 }
 
@@ -684,10 +734,292 @@ fn rewrite_model(body: &[u8], model: &str) -> Vec<u8> {
     body.to_vec()
 }
 
-fn target_url(base: &str, protocol: ProxyProtocol) -> String {
+fn rewrite_body_for_upstream(
+    body: &[u8],
+    model: &str,
+    client_protocol: ProxyProtocol,
+    upstream_protocol: UpstreamProtocol,
+) -> Vec<u8> {
+    match (client_protocol, upstream_protocol) {
+        (ProxyProtocol::OpenAI, UpstreamProtocol::OpenAI)
+        | (ProxyProtocol::Anthropic, UpstreamProtocol::Anthropic) => rewrite_model(body, model),
+        (ProxyProtocol::Anthropic, UpstreamProtocol::OpenAI) => {
+            anthropic_request_to_openai(body, model)
+        }
+        (ProxyProtocol::OpenAI, UpstreamProtocol::Anthropic) => {
+            openai_request_to_anthropic(body, model)
+        }
+    }
+}
+
+fn anthropic_request_to_openai(body: &[u8], model: &str) -> Vec<u8> {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return rewrite_model(body, model);
+    };
+    let mut messages = Vec::new();
+    if let Some(system) = value.get("system") {
+        let system_text = content_to_text(system);
+        if !system_text.is_empty() {
+            messages.push(serde_json::json!({"role": "system", "content": system_text}));
+        }
+    }
+    if let Some(items) = value.get("messages").and_then(Value::as_array) {
+        for item in items {
+            let role = item.get("role").and_then(Value::as_str).unwrap_or("user");
+            let content = item.get("content").map(content_to_text).unwrap_or_default();
+            messages.push(serde_json::json!({"role": role, "content": content}));
+        }
+    }
+
+    let mut out = serde_json::json!({
+        "model": model,
+        "messages": messages,
+    });
+    copy_json_field(&value, &mut out, "max_tokens", "max_tokens");
+    copy_json_field(&value, &mut out, "temperature", "temperature");
+    copy_json_field(&value, &mut out, "top_p", "top_p");
+    copy_json_field(&value, &mut out, "stream", "stream");
+    copy_json_field(&value, &mut out, "stop_sequences", "stop");
+    serde_json::to_vec(&out).unwrap_or_else(|_| rewrite_model(body, model))
+}
+
+fn openai_request_to_anthropic(body: &[u8], model: &str) -> Vec<u8> {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return rewrite_model(body, model);
+    };
+    let mut messages = Vec::new();
+    let mut system_parts = Vec::new();
+    if let Some(items) = value.get("messages").and_then(Value::as_array) {
+        for item in items {
+            let role = item.get("role").and_then(Value::as_str).unwrap_or("user");
+            let content = item.get("content").map(content_to_text).unwrap_or_default();
+            if role == "system" {
+                if !content.is_empty() {
+                    system_parts.push(content);
+                }
+                continue;
+            }
+            let anthropic_role = if role == "assistant" {
+                "assistant"
+            } else {
+                "user"
+            };
+            messages.push(serde_json::json!({"role": anthropic_role, "content": content}));
+        }
+    }
+    let max_tokens = value
+        .get("max_tokens")
+        .or_else(|| value.get("max_completion_tokens"))
+        .cloned()
+        .unwrap_or(Value::from(4096));
+    let mut out = serde_json::json!({
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": messages,
+    });
+    if !system_parts.is_empty() {
+        out["system"] = Value::String(system_parts.join("\n\n"));
+    }
+    copy_json_field(&value, &mut out, "temperature", "temperature");
+    copy_json_field(&value, &mut out, "top_p", "top_p");
+    copy_json_field(&value, &mut out, "stream", "stream");
+    copy_json_field(&value, &mut out, "stop", "stop_sequences");
+    serde_json::to_vec(&out).unwrap_or_else(|_| rewrite_model(body, model))
+}
+
+fn copy_json_field(from: &Value, to: &mut Value, src: &str, dst: &str) {
+    if let Some(value) = from.get(src) {
+        if let Some(obj) = to.as_object_mut() {
+            obj.insert(dst.to_string(), value.clone());
+        }
+    }
+}
+
+fn content_to_text(value: &Value) -> String {
+    if let Some(text) = value.as_str() {
+        return text.to_string();
+    }
+    let Some(items) = value.as_array() else {
+        return value.to_string();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            if let Some(text) = item.as_str() {
+                return Some(text.to_string());
+            }
+            match item.get("type").and_then(Value::as_str) {
+                Some("text") => item
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+                Some("image") | Some("image_url") => Some("[image]".to_string()),
+                _ => item
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn rewrite_response_for_client(
+    body: &[u8],
+    status: StatusCode,
+    client_protocol: ProxyProtocol,
+    upstream_protocol: UpstreamProtocol,
+) -> Vec<u8> {
+    if client_protocol == upstream_protocol.into() || !status.is_success() {
+        return body.to_vec();
+    }
+    match (client_protocol, upstream_protocol) {
+        (ProxyProtocol::Anthropic, UpstreamProtocol::OpenAI) => openai_response_to_anthropic(body),
+        (ProxyProtocol::OpenAI, UpstreamProtocol::Anthropic) => anthropic_response_to_openai(body),
+        _ => body.to_vec(),
+    }
+}
+
+fn openai_response_to_anthropic(body: &[u8]) -> Vec<u8> {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return body.to_vec();
+    };
+    let choice = value
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first());
+    let message = choice.and_then(|item| item.get("message"));
+    let text = message
+        .and_then(|msg| msg.get("content"))
+        .map(content_to_text)
+        .unwrap_or_default();
+    let reasoning = message
+        .and_then(|msg| msg.get("reasoning_content"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let mut content = Vec::new();
+    if !reasoning.is_empty() {
+        content.push(serde_json::json!({"type": "thinking", "thinking": reasoning}));
+    }
+    content.push(serde_json::json!({"type": "text", "text": text}));
+    let usage = value.get("usage").cloned().unwrap_or(Value::Null);
+    let input_tokens = first_u64_in_value(&usage, &[&["prompt_tokens"], &["input_tokens"]]);
+    let output_tokens = first_u64_in_value(&usage, &[&["completion_tokens"], &["output_tokens"]]);
+    let cache_read_input_tokens = first_u64_in_value(
+        &usage,
+        &[
+            &["prompt_tokens_details", "cached_tokens"],
+            &["input_tokens_details", "cached_tokens"],
+            &["cache_read_input_tokens"],
+        ],
+    );
+    let out = serde_json::json!({
+        "id": value.get("id").cloned().unwrap_or_else(|| Value::String(format!("msg_{}", now_secs()))),
+        "type": "message",
+        "role": "assistant",
+        "model": value.get("model").cloned().unwrap_or_else(|| Value::String("unknown".to_string())),
+        "content": content,
+        "stop_reason": openai_finish_to_anthropic(choice.and_then(|item| item.get("finish_reason")).and_then(Value::as_str)),
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": cache_read_input_tokens,
+        }
+    });
+    serde_json::to_vec(&out).unwrap_or_else(|_| body.to_vec())
+}
+
+fn anthropic_response_to_openai(body: &[u8]) -> Vec<u8> {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return body.to_vec();
+    };
+    let content = value
+        .get("content")
+        .map(content_to_text)
+        .unwrap_or_default();
+    let usage = value.get("usage").cloned().unwrap_or(Value::Null);
+    let prompt_tokens = first_u64_in_value(&usage, &[&["input_tokens"], &["prompt_tokens"]]);
+    let completion_tokens =
+        first_u64_in_value(&usage, &[&["output_tokens"], &["completion_tokens"]]);
+    let cached_tokens = first_u64_in_value(
+        &usage,
+        &[
+            &["cache_read_input_tokens"],
+            &["cached_tokens"],
+            &["prompt_tokens_details", "cached_tokens"],
+        ],
+    );
+    let out = serde_json::json!({
+        "id": value.get("id").cloned().unwrap_or_else(|| Value::String(format!("chatcmpl-{}", now_secs()))),
+        "object": "chat.completion",
+        "created": now_secs(),
+        "model": value.get("model").cloned().unwrap_or_else(|| Value::String("unknown".to_string())),
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": content},
+            "finish_reason": anthropic_stop_to_openai(value.get("stop_reason").and_then(Value::as_str)),
+        }],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens.saturating_add(completion_tokens),
+            "prompt_tokens_details": {"cached_tokens": cached_tokens},
+        }
+    });
+    serde_json::to_vec(&out).unwrap_or_else(|_| body.to_vec())
+}
+
+fn first_u64_in_value(value: &Value, paths: &[&[&str]]) -> u64 {
+    for path in paths {
+        let mut cur = value;
+        for key in *path {
+            let Some(next) = cur.get(*key) else {
+                cur = &Value::Null;
+                break;
+            };
+            cur = next;
+        }
+        if let Some(n) = cur.as_u64() {
+            return n;
+        }
+    }
+    0
+}
+
+fn openai_finish_to_anthropic(reason: Option<&str>) -> Value {
+    Value::String(
+        match reason.unwrap_or("stop") {
+            "length" => "max_tokens",
+            "tool_calls" => "tool_use",
+            _ => "end_turn",
+        }
+        .to_string(),
+    )
+}
+
+fn anthropic_stop_to_openai(reason: Option<&str>) -> Value {
+    Value::String(
+        match reason.unwrap_or("end_turn") {
+            "max_tokens" => "length",
+            "tool_use" => "tool_calls",
+            _ => "stop",
+        }
+        .to_string(),
+    )
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn target_url(base: &str, protocol: UpstreamProtocol) -> String {
     match protocol {
-        ProxyProtocol::OpenAI => openai_chat_url(base),
-        ProxyProtocol::Anthropic => anthropic_messages_url(base),
+        UpstreamProtocol::OpenAI => openai_chat_url(base),
+        UpstreamProtocol::Anthropic => anthropic_messages_url(base),
     }
 }
 
@@ -716,11 +1048,11 @@ fn anthropic_messages_url(base: &str) -> String {
 fn apply_channel_auth(
     req: RequestBuilder,
     channel: &Channel,
-    protocol: ProxyProtocol,
+    protocol: UpstreamProtocol,
 ) -> RequestBuilder {
     match protocol {
-        ProxyProtocol::OpenAI => req.header("Authorization", format!("Bearer {}", channel.key)),
-        ProxyProtocol::Anthropic => {
+        UpstreamProtocol::OpenAI => req.header("Authorization", format!("Bearer {}", channel.key)),
+        UpstreamProtocol::Anthropic => {
             if channel.base.to_lowercase().contains("anthropic.com") {
                 req.header("x-api-key", &channel.key)
                     .header("anthropic-version", "2023-06-01")
