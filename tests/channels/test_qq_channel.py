@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -109,6 +109,69 @@ async def test_send_c2c_message_uses_plain_text_c2c_api_with_msg_seq() -> None:
         "msg_seq": 2,
     }
     assert not channel._client.api.group_calls
+
+
+@pytest.mark.asyncio
+async def test_send_c2c_empty_response_retries_same_msg_seq_when_enabled() -> None:
+    class _FlakyApi(_FakeApi):
+        async def post_c2c_message(self, **kwargs):
+            self.c2c_calls.append(kwargs)
+            if len(self.c2c_calls) == 1:
+                return None
+            return {"id": "ok"}
+
+    channel = QQChannel(
+        QQConfig(
+            app_id="app",
+            secret="secret",
+            allow_from=["*"],
+            send_retry_on_empty_response=True,
+            send_retry_attempts=1,
+            send_retry_delay_sec=0,
+        ),
+        MessageBus(),
+    )
+    channel._client = _FakeClient()
+    channel._client.api = _FlakyApi()
+
+    await channel.send(
+        OutboundMessage(
+            channel="qq",
+            chat_id="user123",
+            content="hello",
+            metadata={"message_id": "msg1"},
+        )
+    )
+
+    assert len(channel._client.api.c2c_calls) == 2
+    assert channel._client.api.c2c_calls[0]["msg_seq"] == 2
+    assert channel._client.api.c2c_calls[1]["msg_seq"] == 2
+
+
+@pytest.mark.asyncio
+async def test_send_c2c_empty_response_without_msg_id_does_not_retry() -> None:
+    class _EmptyApi(_FakeApi):
+        async def post_c2c_message(self, **kwargs):
+            self.c2c_calls.append(kwargs)
+            return None
+
+    channel = QQChannel(
+        QQConfig(
+            app_id="app",
+            secret="secret",
+            allow_from=["*"],
+            send_retry_on_empty_response=True,
+            send_retry_attempts=1,
+            send_retry_delay_sec=0,
+        ),
+        MessageBus(),
+    )
+    channel._client = _FakeClient()
+    channel._client.api = _EmptyApi()
+
+    await channel.send(OutboundMessage(channel="qq", chat_id="user123", content="hello"))
+
+    assert len(channel._client.api.c2c_calls) == 1
 
 
 @pytest.mark.asyncio

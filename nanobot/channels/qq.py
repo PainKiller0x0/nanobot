@@ -24,6 +24,7 @@ import json
 import mimetypes
 import os
 import re
+import urllib.request
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -251,6 +252,13 @@ class QQConfig(Base):
     # Signature validation alert reporting
     signature_alert_enabled: bool = True
     signature_alert_chat_id: str = ""
+
+    # botpy logs timeout and returns None instead of raising; these knobs let us
+    # retry passive replies with the same msg_seq while avoiding duplicate cron pushes.
+    botpy_http_timeout_sec: float = 5.0
+    send_retry_on_empty_response: bool = False
+    send_retry_attempts: int = 1
+    send_retry_delay_sec: float = 0.8
 
 
 class QQChannel(BaseChannel):
@@ -752,12 +760,12 @@ class QQChannel(BaseChannel):
 
     def _verify_and_unwrap_signed_payload(self, content: str) -> str | None:
         """Verify signed payload and return body using QQ-Sidecar-RS."""
-        import urllib.request, json
         try:
             req = urllib.request.Request("http://172.17.0.1:8092/verify", data=json.dumps({"content": content}).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                if data.get("success"): return data.get("body")
+                if data.get("success"):
+                    return data.get("body")
                 return None
         except Exception as e:
             logger.error(f"QQ sidecar verify error: {e}")
@@ -1173,10 +1181,69 @@ class QQChannel(BaseChannel):
         else:
             payload["content"] = content
 
-        if is_group:
-            await self._client.api.post_group_message(group_openid=chat_id, **payload)
-        else:
-            await self._client.api.post_c2c_message(openid=chat_id, **payload)
+        await self._post_text_payload(
+            chat_id=chat_id,
+            is_group=is_group,
+            msg_id=msg_id,
+            payload=payload,
+        )
+
+    def _apply_botpy_http_timeout(self) -> None:
+        """Keep botpy sends from hanging longer than our QQ channel budget."""
+        timeout = float(getattr(self.config, "botpy_http_timeout_sec", 0) or 0)
+        if not self._client or timeout <= 0:
+            return
+        try:
+            api = getattr(self._client, "api", None)
+            http = getattr(api, "_http", None)
+            if http is not None:
+                http.timeout = timeout
+        except Exception as e:  # pragma: no cover - defensive only
+            logger.debug("QQ botpy timeout tune skipped: {}", e)
+
+    async def _post_text_payload(
+        self,
+        chat_id: str,
+        is_group: bool,
+        msg_id: str | None,
+        payload: dict[str, Any],
+    ) -> None:
+        """Post text through botpy, retrying passive replies when botpy reports no response."""
+        self._apply_botpy_http_timeout()
+        can_retry = bool(msg_id) and bool(getattr(self.config, "send_retry_on_empty_response", False))
+        retry_attempts = int(getattr(self.config, "send_retry_attempts", 0) or 0)
+        attempts = 1 + max(0, retry_attempts if can_retry else 0)
+        delay = max(0.0, float(getattr(self.config, "send_retry_delay_sec", 0.0) or 0.0))
+
+        for attempt in range(1, attempts + 1):
+            try:
+                if is_group:
+                    result = await self._client.api.post_group_message(group_openid=chat_id, **payload)
+                else:
+                    result = await self._client.api.post_c2c_message(openid=chat_id, **payload)
+                if can_retry and result is None:
+                    raise asyncio.TimeoutError("QQ API returned no response")
+                return
+            except (asyncio.TimeoutError, aiohttp.ClientError, OSError) as e:
+                if attempt >= attempts:
+                    logger.warning(
+                        "QQ text send failed after {} attempt(s) chat_id={} msg_seq={} err={}",
+                        attempts,
+                        chat_id,
+                        payload.get("msg_seq"),
+                        e,
+                    )
+                    raise
+                logger.warning(
+                    "QQ text send attempt {}/{} failed chat_id={} msg_seq={} err={}; retrying same msg_seq",
+                    attempt,
+                    attempts,
+                    chat_id,
+                    payload.get("msg_seq"),
+                    e,
+                )
+                if delay:
+                    await asyncio.sleep(delay)
 
     async def _send_media(
         self,
@@ -1658,9 +1725,7 @@ class QQChannel(BaseChannel):
     ) -> str | None:
         """Download an inbound attachment using QQ-Sidecar-RS."""
         import time
-        from urllib.parse import urlparse
-        from pathlib import Path
-        
+
         ts = int(time.time() * 1000)
         safe = _sanitize_filename(filename_hint)
         ext = Path(urlparse(url).path).suffix
