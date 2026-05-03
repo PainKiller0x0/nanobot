@@ -252,9 +252,9 @@ fn route_decision(
     if router.monthly_hard_limit_rmb > 0.0 && monthly_cost >= router.monthly_hard_limit_rmb {
         let mut decision = RouteDecision {
             requested_model: requested_model.to_string(),
-            desired_model: router.emergency_model.clone(),
-            role: "emergency".to_string(),
-            group: group_for_role(router, "emergency"),
+            desired_model: router.backup_model.clone(),
+            role: "backup".to_string(),
+            group: group_for_role(router, "backup"),
             reason: format!("monthly hard limit reached {:.2} CNY", monthly_cost),
         };
         if router.dry_run {
@@ -385,35 +385,29 @@ async fn build_attempts(
     decision: &RouteDecision,
 ) -> Vec<Attempt> {
     let mut specs = Vec::new();
-    add_attempt_spec(
+    add_role_attempts(
         &mut specs,
+        router,
         decision.role.clone(),
-        decision.group.clone(),
         decision.desired_model.clone(),
         false,
     );
-    for role in ["default", "pro", "emergency", "backup", "any"] {
-        let desired = match role {
-            "pro" => router.pro_model.as_str(),
-            "emergency" => router.emergency_model.as_str(),
-            "backup" => router.backup_model.as_str(),
-            "default" => router.default_model.as_str(),
-            _ => decision.desired_model.as_str(),
-        };
-        let group = group_for_role(router, role);
-        add_attempt_spec(
-            &mut specs,
-            role.to_string(),
-            group.clone(),
-            desired.to_string(),
-            true,
-        );
-        if !group.is_empty() {
+
+    for &role in fallback_roles(&decision.role) {
+        if role == "any" {
             add_attempt_spec(
                 &mut specs,
-                role.to_string(),
+                "any".to_string(),
                 String::new(),
-                desired.to_string(),
+                decision.desired_model.clone(),
+                true,
+            );
+        } else {
+            add_role_attempts(
+                &mut specs,
+                router,
+                role.to_string(),
+                model_for_role(router, role).to_string(),
                 true,
             );
         }
@@ -460,6 +454,47 @@ async fn build_attempts(
         }
     }
     attempts
+}
+
+fn fallback_roles(role: &str) -> &'static [&'static str] {
+    match role {
+        // When the monthly hard limit is reached, save the emergency pool for true incidents.
+        "backup" => &["emergency", "any"],
+        // Normal traffic should fail over to emergency first because this means the main pool timed out or errored.
+        "default" | "pro" => &["emergency", "backup", "any"],
+        "emergency" => &["backup", "any"],
+        _ => &["any"],
+    }
+}
+
+fn model_for_role<'a>(router: &'a RouterConfig, role: &str) -> &'a str {
+    match role {
+        "pro" => router.pro_model.as_str(),
+        "emergency" => router.emergency_model.as_str(),
+        "backup" => router.backup_model.as_str(),
+        "default" => router.default_model.as_str(),
+        _ => router.default_model.as_str(),
+    }
+}
+
+fn add_role_attempts(
+    specs: &mut Vec<AttemptSpec>,
+    router: &RouterConfig,
+    role: String,
+    desired_model: String,
+    fallback: bool,
+) {
+    let group = group_for_role(router, &role);
+    add_attempt_spec(
+        specs,
+        role.clone(),
+        group.clone(),
+        desired_model.clone(),
+        fallback,
+    );
+    if !group.is_empty() {
+        add_attempt_spec(specs, role, String::new(), desired_model, true);
+    }
 }
 
 fn add_attempt_spec(
