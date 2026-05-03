@@ -98,16 +98,27 @@ fn now_iso() -> String {
 
 #[derive(Clone, Default)]
 struct LlmSettings {
+    enabled: bool,
     api_base: String,
     api_key: String,
     model: String,
 }
 
 impl LlmSettings {
-    fn enabled(&self) -> bool {
+    fn configured(&self) -> bool {
         !self.api_base.trim().is_empty()
             && !self.api_key.trim().is_empty()
             && !self.model.trim().is_empty()
+    }
+
+    fn free_allowed(&self) -> bool {
+        let base = self.api_base.to_lowercase();
+        let model = self.model.to_lowercase();
+        base.contains("longcat") && model.contains("longcat-flash-lite")
+    }
+
+    fn enabled(&self) -> bool {
+        self.enabled && self.configured() && self.free_allowed()
     }
 }
 
@@ -177,7 +188,13 @@ fn load_llm_settings_compat(path: &PathBuf) -> LlmSettings {
             .to_string()
     };
 
+    let enabled = root
+        .get("llm_enabled")
+        .and_then(|v| v.as_bool())
+        .or_else(|| llm_obj.get("enabled").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
     LlmSettings {
+        enabled,
         api_base: get_field("api_base"),
         api_key: get_field("api_key"),
         model: get_field("model"),
@@ -209,10 +226,7 @@ fn load_auto_refresh_config(path: &PathBuf) -> AutoRefreshConfig {
 
 fn ad_score(title: &str, summary: &str, _content: &str) -> i32 {
     let text = format!("{}\n{}", title, summary).to_lowercase();
-    let hard_title = [
-        "八段锦的猛料",
-        "刺痛了多少中国女人",
-    ];
+    let hard_title = ["八段锦的猛料", "刺痛了多少中国女人"];
     let hard = [
         "-广告-",
         "限时0元",
@@ -309,6 +323,19 @@ fn write_settings(path: &PathBuf, data: &Value) -> Result<(), String> {
     fs::write(path, payload).map_err(|e| e.to_string())
 }
 
+fn masked_secret(value: &str) -> String {
+    if value.trim().is_empty() {
+        String::new()
+    } else {
+        "********".to_string()
+    }
+}
+
+fn is_masked_secret(value: &str) -> bool {
+    let v = value.trim();
+    !v.is_empty() && v.chars().all(|c| c == '*')
+}
+
 fn query_param(link: &str, key: &str) -> Option<String> {
     let qpos = link.find('?')?;
     let qs = &link[qpos + 1..];
@@ -397,7 +424,13 @@ async fn fetch_article_markdown_from_link(client: &Client, url: &str) -> Option<
     if link.is_empty() {
         return None;
     }
-    let resp = client.get(link).send().await.ok()?.error_for_status().ok()?;
+    let resp = client
+        .get(link)
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?;
     let html = resp.text().await.ok()?;
     let md = parse_html(&html).trim().to_string();
     if md.is_empty() {
@@ -562,15 +595,15 @@ async fn build_yage_daily_entries(days: i64, client: &Client) -> Result<Vec<Entr
             continue;
         }
         let published_at = rfc3339_from_date(d);
-        let (title, content_markdown, summary) = match fetch_yage_article_markdown(client, &url).await
-        {
-            Some(v) => v,
-            None => (
-                yage_title_from_url(&url),
-                format!("[文章原文]({url})"),
-                format!("鸭哥 AI 每日记录 {}", d.format("%Y-%m-%d")),
-            ),
-        };
+        let (title, content_markdown, summary) =
+            match fetch_yage_article_markdown(client, &url).await {
+                Some(v) => v,
+                None => (
+                    yage_title_from_url(&url),
+                    format!("[文章原文]({url})"),
+                    format!("鸭哥 AI 每日记录 {}", d.format("%Y-%m-%d")),
+                ),
+            };
         items.push(Entry {
             id: 0,
             subscription_id: 0,
@@ -901,7 +934,10 @@ async fn refresh_one(
                 now,
                 seen,
                 saved,
-                format!("max_age_days={days};ad_skipped={ad_skipped}"),
+                format!(
+                    "max_age_days={days};ad_skipped={ad_skipped};llm_ad={}",
+                    if llm.enabled() { "free_longcat" } else { "off" }
+                ),
                 run_id
             ],
         )
@@ -953,7 +989,7 @@ async fn root() -> Html<&'static str> {
 </style></head>
 <body><div class="wrap"><section class="hero"><div><h1 class="title">RSS Sidecar · Rust</h1><p class="sub">统一订阅中台（WeChat / Yage）+ 东八区时间 + 广告文跳过（规则 + 可选LLM）</p></div><div class="btns"><button class="btn-main" onclick="refreshAll()">刷新全部订阅</button><button onclick="loadAll()">刷新页面数据</button><button id="themeToggle" class="theme-btn" onclick="toggleTheme()">Theme</button><div class="auto-ctl"><label><input id="auto_enabled" type="checkbox" onchange="saveAutoRefresh()"> 自动刷新</label><input id="auto_interval_seconds" type="number" min="5" step="1" value="3600" onchange="saveAutoRefresh()">秒<button onclick="saveAutoRefresh()">应用</button></div><div id="auto_hint" class="muted auto-hint"></div></div></section>
 <section class="grid"><div class="card stats-card"><h2 class="h">运行概览</h2><div class="stats" id="stats"></div></div><div class="card subs-card"><h2 class="h">订阅列表</h2><div class="add-sub"><input id="new_biz" placeholder="biz (可选)"/><input id="new_name" placeholder="name"/><input id="new_feed_url" placeholder="feed url (https://...)"/><button onclick="createSub()">Add</button></div><div class="subs" id="subs"></div></div><div class="card entries-card"><h2 class="h">最近文章（东八区）</h2><div class="entries" id="entries"></div></div>
-<div class="card llm-card"><h2 class="h">LLM 设置</h2><div class="llm-grid"><div class="llm-field"><div class="muted">API Base</div><input id="llm_api_base" placeholder="https://.../v1"/></div><div class="llm-field"><div class="muted">API Key</div><input id="llm_api_key" type="password" placeholder="sk-..."/></div><div class="llm-field"><div class="muted">Model</div><input id="llm_model" placeholder="gpt-4.1 / deepseek-chat"/></div></div><div class="llm-actions"><button onclick="saveLlm()">保存设置</button><button onclick="testLlm()">测试连接</button></div><div id="llm_result" class="llm-result">这里显示模型连通测试结果。</div></div>
+<div class="card llm-card"><h2 class="h">LLM 设置</h2><p class="muted">费用策略：仅允许 LongCat-Flash-Lite 自动参与广告判定；其他模型不会被 sidecar 自动调用。</p><label class="llm-switch"><input id="llm_enabled" type="checkbox"/> 启用免费 LLM 广告判定</label><div class="llm-grid"><div class="llm-field"><div class="muted">API Base</div><input id="llm_api_base" placeholder="https://api.longcat.chat/openai/v1"/></div><div class="llm-field"><div class="muted">API Key</div><input id="llm_api_key" type="password" placeholder="ak-..."/></div><div class="llm-field"><div class="muted">Model</div><input id="llm_model" placeholder="LongCat-Flash-Lite"/></div></div><div class="llm-actions"><button onclick="saveLlm()">保存设置</button><button onclick="testLlm()">测试连接</button></div><div id="llm_result" class="llm-result">这里显示模型连通测试结果。</div></div>
 </section></div>
 <div id="mdModal" class="modal" aria-hidden="true"><div class="modal-mask" onclick="closePreview()"></div><div class="modal-panel"><div class="modal-head"><h3 id="mdTitle">Markdown Preview</h3><button onclick="closePreview()">关闭</button></div><div id="mdBody" class="md-body muted">加载中...</div></div></div>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -1023,9 +1059,13 @@ async function saveAutoRefresh(){
 }
 function statusChip(v){const ok=(v||'').toLowerCase()==='ok';return `<span class="chip ${ok?'ok':'err'}">${ok?'正常':'异常'} · ${esc(v||'n/a')}</span>`;}
 function setLlmResult(t){document.getElementById('llm_result').textContent=t||'';}
-async function loadLlm(){const d=await j('/api/settings/llm');const it=d.item||{};document.getElementById('llm_api_base').value=it.api_base||'';document.getElementById('llm_api_key').value=it.api_key||'';document.getElementById('llm_model').value=it.model||'';}
-async function saveLlm(){const p={api_base:document.getElementById('llm_api_base').value.trim(),api_key:document.getElementById('llm_api_key').value.trim(),model:document.getElementById('llm_model').value.trim()};const d=await j('/api/settings/llm',{method:'POST',body:JSON.stringify(p)});if(d.error)throw new Error(d.error);setLlmResult('保存成功 / Saved');}
-async function testLlm(){const p={api_base:document.getElementById('llm_api_base').value.trim(),api_key:document.getElementById('llm_api_key').value.trim(),model:document.getElementById('llm_model').value.trim()};setLlmResult('测试中...');const d=await j('/api/settings/llm/test',{method:'POST',body:JSON.stringify(p)});if(d.error){setLlmResult('测试失败: '+d.error);return;}const it=d.item||{};setLlmResult(`连接成功\nendpoint: ${it.endpoint||''}\nmodel: ${it.model||''}\nlatency: ${it.latency_ms||0} ms\npreview: ${it.preview||''}`);}
+async function loadLlm(){const d=await j('/api/settings/llm');const it=d.item||{};document.getElementById('llm_enabled').checked=!!it.enabled;document.getElementById('llm_api_base').value=it.api_base||'';document.getElementById('llm_api_key').value=it.api_key||'';document.getElementById('llm_model').value=it.model||'';setLlmResult(`策略: ${it.cost_policy||'free_only'} · 自动判定: ${it.auto_active?'开启':'关闭'} · Key: ${it.api_key_present?'已保存':'未配置'}`);}
+async function saveLlm(){const p={enabled:document.getElementById('llm_enabled').checked,api_base:document.getElementById('llm_api_base').value.trim(),api_key:document.getElementById('llm_api_key').value.trim(),model:document.getElementById('llm_model').value.trim()};const d=await j('/api/settings/llm',{method:'POST',body:JSON.stringify(p)});if(d.error)throw new Error(d.error);setLlmResult('保存成功 / Saved');await loadLlm();}
+async function testLlm(){const p={api_base:document.getElementById('llm_api_base').value.trim(),api_key:document.getElementById('llm_api_key').value.trim(),model:document.getElementById('llm_model').value.trim()};setLlmResult('测试中...');const d=await j('/api/settings/llm/test',{method:'POST',body:JSON.stringify(p)});if(d.error){setLlmResult('测试失败: '+d.error);return;}const it=d.item||{};setLlmResult(`连接成功
+endpoint: ${it.endpoint||''}
+model: ${it.model||''}
+latency: ${it.latency_ms||0} ms
+preview: ${it.preview||''}`);}
 async function createSub(){const p={biz:document.getElementById('new_biz').value.trim(),name:document.getElementById('new_name').value.trim(),feed_url:document.getElementById('new_feed_url').value.trim()};if(!p.feed_url){alert('feed_url required');return;}const d=await j('/api/subscriptions',{method:'POST',body:JSON.stringify(p)});if(d.error){alert('create failed: '+d.error);return;}document.getElementById('new_biz').value='';document.getElementById('new_name').value='';document.getElementById('new_feed_url').value='';alert('created');await loadAll();}
 async function loadStats(subs,entries){const ok=subs.filter(x=>(x.last_status||'').toLowerCase()==='ok').length;const err=subs.filter(x=>(x.last_status||'').toLowerCase()==='error').length;const enabled=subs.filter(x=>x.enabled===1).length;const stats=[['订阅总数',subs.length],['启用中',enabled],['状态正常',ok],['异常订阅',err],['最近文章',entries.length]];document.getElementById('stats').innerHTML=stats.map(s=>`<div class="stat"><span class="muted">${s[0]}</span><b>${s[1]}</b></div>`).join('');}
 async function toggleSub(id){const d=await j('/api/subscriptions/'+id+'/toggle',{method:'POST',body:'{}'});if(d.error){alert('toggle failed: '+d.error);return;}await loadAll();}
@@ -1276,7 +1316,15 @@ async fn list_runs(State(st): State<Arc<AppState>>, Query(q): Query<ListQuery>) 
 
 async fn get_settings_llm(State(st): State<Arc<AppState>>) -> Json<Value> {
     let llm = load_llm_settings_compat(&st.settings_path);
-    Json(json!({"item": {"api_base": llm.api_base, "api_key": llm.api_key, "model": llm.model}}))
+    Json(json!({"item": {
+        "enabled": llm.enabled,
+        "api_base": llm.api_base,
+        "api_key": masked_secret(&llm.api_key),
+        "api_key_present": !llm.api_key.trim().is_empty(),
+        "model": llm.model,
+        "cost_policy": "free_only",
+        "auto_active": llm.enabled()
+    }}))
 }
 
 async fn get_article(State(st): State<Arc<AppState>>, Path(id): Path<i64>) -> Json<Value> {
@@ -1518,7 +1566,12 @@ async fn set_auto_refresh(
         .get("seconds")
         .and_then(|v| v.as_i64())
         .or_else(|| payload.get("interval_seconds").and_then(|v| v.as_i64()))
-        .or_else(|| payload.get("minutes").and_then(|v| v.as_i64()).map(|v| v * 60))
+        .or_else(|| {
+            payload
+                .get("minutes")
+                .and_then(|v| v.as_i64())
+                .map(|v| v * 60)
+        })
         .unwrap_or(3600)
         .clamp(5, 86400);
     let mut settings = read_settings(&st.settings_path);
@@ -1539,13 +1592,17 @@ async fn set_llm_settings(
     State(st): State<Arc<AppState>>,
     Json(payload): Json<Value>,
 ) -> Json<Value> {
+    let enabled = payload
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let api_base = payload
         .get("api_base")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .trim()
         .to_string();
-    let api_key = payload
+    let incoming_api_key = payload
         .get("api_key")
         .and_then(|v| v.as_str())
         .unwrap_or("")
@@ -1558,10 +1615,17 @@ async fn set_llm_settings(
         .trim()
         .to_string();
     let mut settings = read_settings(&st.settings_path);
+    let existing = load_llm_settings_compat(&st.settings_path);
+    let api_key = if incoming_api_key.is_empty() || is_masked_secret(&incoming_api_key) {
+        existing.api_key
+    } else {
+        incoming_api_key
+    };
+    settings["llm_enabled"] = json!(enabled);
     settings["api_base"] = json!(api_base.clone());
     settings["api_key"] = json!(api_key.clone());
     settings["model"] = json!(model.clone());
-    settings["llm"] = json!({"api_base": api_base, "api_key": api_key, "model": model});
+    settings["llm"] = json!({"enabled": enabled, "api_base": api_base, "api_key": api_key, "model": model, "cost_policy": "free_only"});
     if let Err(e) = write_settings(&st.settings_path, &settings) {
         return Json(json!({"error":e}));
     }
@@ -1577,13 +1641,21 @@ async fn test_llm_settings(
         llm.api_base = v.trim().to_string();
     }
     if let Some(v) = payload.get("api_key").and_then(|v| v.as_str()) {
-        llm.api_key = v.trim().to_string();
+        let incoming = v.trim();
+        if !incoming.is_empty() && !is_masked_secret(incoming) {
+            llm.api_key = incoming.to_string();
+        }
     }
     if let Some(v) = payload.get("model").and_then(|v| v.as_str()) {
         llm.model = v.trim().to_string();
     }
-    if !llm.enabled() {
+    if !llm.configured() {
         return Json(json!({"error":"Please provide API Base, API Key, and Model"}));
+    }
+    if !llm.free_allowed() {
+        return Json(
+            json!({"error":"RSS sidecar only allows free LongCat-Flash-Lite for automatic LLM checks"}),
+        );
     }
     let mut url = llm.api_base.trim_end_matches('/').to_string();
     if !url.ends_with("/chat/completions") {

@@ -368,6 +368,23 @@ python3 ops/scripts/smoke-model-switch.py --refresh-lof
 
 这套 smoke 的目标不是测模型智商，而是确认“换模型不丢 sidecar 能力、不误升 Pro、不破坏工具调用、不把预算熔断顺序打乱”。
 
+
+## Sidecar 模型费用策略
+
+按 API 计费后，sidecar 的默认职责是抓取、缓存、规则判断和格式化；自动链路只能调用明确免费的模型。
+
+当前允许自动调用的免费模型：
+
+- RSS 广告判定：仅允许 `LongCat-Flash-Lite`，且 base 必须是 LongCat；其他模型即使填了 key 也不会被自动刷新链路调用。
+- Reflexio 事实提取：默认 `LongCat-Flash-Lite`，`REFLEXIO_ALLOW_PAID_LLM=false` 时付费模型不会自动启用。
+- Reflexio embedding：仅在配置了硅基流动免费 embedding key 且 endpoint/model 命中免费白名单时启用；否则回退到本地 SQLite 文本检索。
+- Trend、LOF、Notify、QQ sidecar：保持纯规则/抓取/投递，不直接调用 LLM。
+- OBP 是模型网关，不主动消费模型；只有外部请求进来才转发并计费。
+
+部署约束：RSS 容器使用 Podman，本地已有镜像时 `deploy-sidecar rss` 会复用 `localhost/wechat-rss-rs:local`，只替换 Rust 二进制，不再默认拉 Docker Hub。若必须完整重建，可用 `WECHAT_RSS_BASE_IMAGE=<国内镜像>/library/debian:bookworm-slim` 显式指定基础镜像。
+
+回测记录：RSS `LongCat-Flash-Lite` 连通成功但延迟约 10s；实际刷新只在规则分数暧昧时调用免费 LLM。Reflexio 使用 `LongCat-Flash-Lite` 做事实提取回测通过，约 2s。
+
 ## 变更 checklist
 
 新增功能时按这个顺序判断：

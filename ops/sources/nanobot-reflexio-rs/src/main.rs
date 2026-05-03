@@ -22,14 +22,16 @@ use crate::provider::{ChatMessage, LlmProvider};
 use crate::storage::DbStore;
 
 struct AppState {
-    provider: LlmProvider,
+    provider: Option<LlmProvider>,
+    llm_model: String,
     embedding: EmbeddingService,
     db: Mutex<DbStore>,
 }
 
 #[derive(Debug, Deserialize)]
 struct InteractionData {
-    role: String,
+    #[serde(rename = "role")]
+    _role: String,
     content: String,
 }
 
@@ -108,6 +110,21 @@ fn default_threshold() -> f32 {
     0.3
 }
 
+fn env_bool(name: &str, default: bool) -> bool {
+    match env::var(name) {
+        Ok(v) => matches!(
+            v.trim().to_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => default,
+    }
+}
+
+fn is_free_llm(base_url: &str, model: &str) -> bool {
+    base_url.to_lowercase().contains("longcat")
+        && model.to_lowercase().contains("longcat-flash-lite")
+}
+
 #[derive(Debug, Serialize)]
 struct SearchResponse {
     results: Vec<SearchResult>,
@@ -120,19 +137,41 @@ async fn main() {
     dotenv().ok();
     tracing_subscriber::fmt::init();
 
-    let api_key = env::var("LLM_API_KEY").expect("LLM_API_KEY must be set");
-    let base_url =
-        env::var("LLM_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    let api_key = env::var("LLM_API_KEY").unwrap_or_default();
+    let base_url = env::var("LLM_BASE_URL")
+        .unwrap_or_else(|_| "https://api.longcat.chat/openai/v1".to_string());
+    let llm_model = env::var("LLM_MODEL").unwrap_or_else(|_| "LongCat-Flash-Lite".to_string());
+    let allow_paid_llm = env_bool("REFLEXIO_ALLOW_PAID_LLM", false);
+    let llm_facts_enabled = env_bool("REFLEXIO_LLM_FACTS_ENABLED", true)
+        && !api_key.trim().is_empty()
+        && (allow_paid_llm || is_free_llm(&base_url, &llm_model));
     let db_path = env::var("DATABASE_URL").unwrap_or_else(|_| "reflexio.db".to_string());
     if let Some(parent) = Path::new(&db_path).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
 
     let embed_api_key = env::var("EMBEDDING_API_KEY")
-        .unwrap_or_else(|_| env::var("SILICONFLOW_API_KEY").unwrap_or_else(|_| api_key.clone()));
+        .or_else(|_| env::var("SILICONFLOW_API_KEY"))
+        .unwrap_or_default();
+
+    println!(
+        "Reflexio cost policy: llm_facts={} model={} embedding={}",
+        if llm_facts_enabled { "free" } else { "off" },
+        llm_model,
+        if embed_api_key.trim().is_empty() {
+            "off"
+        } else {
+            "configured"
+        }
+    );
 
     let state = Arc::new(AppState {
-        provider: LlmProvider::new(api_key, base_url),
+        provider: if llm_facts_enabled {
+            Some(LlmProvider::new(api_key, base_url))
+        } else {
+            None
+        },
+        llm_model,
         embedding: EmbeddingService::new(embed_api_key),
         db: Mutex::new(DbStore::new(&db_path).expect("Failed to init DB")),
     });
@@ -287,6 +326,26 @@ async fn search(
         return Ok(Json(SearchResponse { results: vec![] }));
     }
 
+    if !state.embedding.enabled() {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let results = db
+            .search_memories(&payload.query, payload.limit)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| SearchResult {
+                id: m.id,
+                score: 1.0,
+                content: m.content,
+                kind: format!("memory:{}", m.category),
+                created_at: m.created_at,
+            })
+            .collect();
+        return Ok(Json(SearchResponse { results }));
+    }
+
     let query_emb = state
         .embedding
         .embed_single(&payload.query)
@@ -328,45 +387,53 @@ async fn publish_interaction(
             .unwrap_or(-1)
     };
 
-    // Embed interaction content (fire-and-forget)
-    let state_clone = Arc::clone(&state);
-    let content_for_embed = content.clone();
-    tokio::spawn(async move {
-        if let Ok(emb) = state_clone.embedding.embed_single(&content_for_embed).await {
-            let db = state_clone.db.lock().unwrap();
-            let _ = db.update_interaction_embedding(int_id, &emb);
-        }
-    });
-
-    // Extract facts via LLM (fire-and-forget)
-    let state_clone2 = Arc::clone(&state);
-    let user_id = payload.user_id.clone();
-    tokio::spawn(async move {
-        let messages = vec![
-            ChatMessage {
-                role: "system".to_string(),
-                content: crate::reasoning::PROFILE_UPDATE_PROMPT.to_string(),
-            },
-            ChatMessage {
-                role: "user".to_string(),
-                content: content.clone(),
-            },
-        ];
-        if let Ok(reflection) = state_clone2.provider.query("minimax-m2.7", messages).await {
-            if reflection.len() > 5 && !reflection.contains("PASS") {
-                let fact_id = {
-                    let db = state_clone2.db.lock().unwrap();
-                    db.save_fact(&user_id, &reflection).unwrap_or(-1)
-                };
-                // Embed the fact
-                if let Ok(emb) = state_clone2.embedding.embed_single(&reflection).await {
-                    let db = state_clone2.db.lock().unwrap();
-                    let _ = db.update_fact_embedding(fact_id, &emb);
-                }
-                println!("Fact extracted for {}: {} bytes", user_id, reflection.len());
+    // Embed interaction content only when a free/allowed embedding provider is configured.
+    if state.embedding.enabled() {
+        let state_clone = Arc::clone(&state);
+        let content_for_embed = content.clone();
+        tokio::spawn(async move {
+            if let Ok(emb) = state_clone.embedding.embed_single(&content_for_embed).await {
+                let db = state_clone.db.lock().unwrap();
+                let _ = db.update_interaction_embedding(int_id, &emb);
             }
-        }
-    });
+        });
+    }
+
+    // Extract facts only through the configured free LLM route.
+    if state.provider.is_some() {
+        let state_clone2 = Arc::clone(&state);
+        let user_id = payload.user_id.clone();
+        tokio::spawn(async move {
+            let messages = vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: crate::reasoning::PROFILE_UPDATE_PROMPT.to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: content.clone(),
+                },
+            ];
+            if let Some(provider) = state_clone2.provider.as_ref() {
+                if let Ok(reflection) = provider.query(&state_clone2.llm_model, messages).await {
+                    if reflection.len() > 5 && !reflection.contains("PASS") {
+                        let fact_id = {
+                            let db = state_clone2.db.lock().unwrap();
+                            db.save_fact(&user_id, &reflection).unwrap_or(-1)
+                        };
+                        if state_clone2.embedding.enabled() {
+                            if let Ok(emb) = state_clone2.embedding.embed_single(&reflection).await
+                            {
+                                let db = state_clone2.db.lock().unwrap();
+                                let _ = db.update_fact_embedding(fact_id, &emb);
+                            }
+                        }
+                        println!("Fact extracted for {}: {} bytes", user_id, reflection.len());
+                    }
+                }
+            }
+        });
+    }
 
     Json(GenericResponse {
         success: true,

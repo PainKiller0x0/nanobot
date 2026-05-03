@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Result};
+use rusqlite::{Connection, Result};
 use std::path::Path;
 
 pub fn init_db<P: AsRef<Path>>(path: P) -> Result<()> {

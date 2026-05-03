@@ -125,7 +125,22 @@ deploy_rss() {
     return 0
   fi
   if [[ "$SKIP_BUILD" -eq 0 ]]; then
-    run podman build -f "$src/Dockerfile.fast" --build-arg "APT_MIRROR=$APT_MIRROR" -t localhost/wechat-rss-rs:local "$src"
+    local base_image="${WECHAT_RSS_BASE_IMAGE:-localhost/wechat-rss-rs:local}"
+    if podman image exists "$base_image"; then
+      log "rss local refresh: rebuild host binary and reuse base image $base_image"
+      run cargo build --release --manifest-path "$src/Cargo.toml"
+      cat > "$src/Dockerfile.local-refresh" <<EOF
+FROM $base_image
+COPY target/release/wechat-rss-rs /usr/local/bin/wechat-rss-rs
+RUN chmod +x /usr/local/bin/wechat-rss-rs
+EOF
+      run podman build --pull=never -f "$src/Dockerfile.local-refresh" -t localhost/wechat-rss-rs:local "$src"
+      run rm -f "$src/Dockerfile.local-refresh"
+    else
+      base_image="${WECHAT_RSS_BASE_IMAGE:-docker.m.daocloud.io/library/debian:bookworm-slim}"
+      log "rss full rebuild: base image $base_image"
+      run podman build -f "$src/Dockerfile.fast" --build-arg "BASE_IMAGE=$base_image" --build-arg "APT_MIRROR=$APT_MIRROR" -t localhost/wechat-rss-rs:local "$src"
+    fi
   fi
   run systemctl daemon-reload
   if [[ "$SKIP_RESTART" -eq 0 ]]; then

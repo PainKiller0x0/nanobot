@@ -23,6 +23,7 @@ pub struct EmbeddingService {
     api_key: String,
     endpoint: String,
     model: String,
+    enabled: bool,
 }
 
 impl EmbeddingService {
@@ -30,17 +31,30 @@ impl EmbeddingService {
         let endpoint = std::env::var("EMBEDDING_ENDPOINT")
             .unwrap_or_else(|_| "https://api.siliconflow.cn/v1/embeddings".to_string());
         let model = std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| "BAAI/bge-m3".to_string());
+        let allow_paid = env_bool("REFLEXIO_ALLOW_PAID_EMBEDDING", false);
+        let enabled_by_env = env_bool("REFLEXIO_EMBEDDING_ENABLED", true);
+        let enabled = enabled_by_env
+            && !api_key.trim().is_empty()
+            && (allow_paid || is_free_embedding(&endpoint, &model));
         Self {
             client: Client::new(),
             api_key,
             endpoint,
             model,
+            enabled,
         }
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled
     }
 
     pub async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(vec![]);
+        }
+        if !self.enabled {
+            anyhow::bail!("embedding disabled by free-only sidecar policy");
         }
         let req = EmbeddingRequest {
             model: self.model.clone(),
@@ -70,6 +84,20 @@ impl EmbeddingService {
     }
 }
 
+fn env_bool(name: &str, default: bool) -> bool {
+    match std::env::var(name) {
+        Ok(v) => matches!(
+            v.trim().to_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => default,
+    }
+}
+
+fn is_free_embedding(endpoint: &str, model: &str) -> bool {
+    endpoint.to_lowercase().contains("siliconflow") && model.to_lowercase().contains("bge")
+}
+
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
@@ -80,7 +108,7 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if norm_a == 0.0 || norm_b == 0.0 {
         return 0.0;
     }
-    dot / (norm_a * norm_b)
+    dot / norm_a / norm_b
 }
 
 pub fn vec_to_bytes(vec: &[f32]) -> Vec<u8> {

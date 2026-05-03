@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402,I001
 from __future__ import annotations
 
 import argparse
@@ -6,15 +7,15 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
-import urllib.parse
 
 _SHARED_DIR = Path(__file__).resolve().parents[1] / "_shared"
 if _SHARED_DIR.exists():
     sys.path.insert(0, str(_SHARED_DIR))
 
-from ops_common import JsonHttpClient
+from ops_common import JsonHttpClient  # noqa: E402
 
 
 HTTP = JsonHttpClient(
@@ -314,6 +315,9 @@ def main() -> int:
     llm_parser.add_argument('--api-base')
     llm_parser.add_argument('--api-key')
     llm_parser.add_argument('--model')
+    llm_toggle = llm_parser.add_mutually_exclusive_group()
+    llm_toggle.add_argument('--enabled', action='store_true')
+    llm_toggle.add_argument('--disabled', action='store_true')
 
     refresh_parser = subparsers.add_parser('refresh')
     refresh_parser.add_argument('--subscription-id', type=int)
@@ -364,9 +368,25 @@ def main() -> int:
         )
 
     if args.command == 'llm-settings':
-        if args.api_base is None and args.api_key is None and args.model is None:
+        if args.api_base is None and args.api_key is None and args.model is None and not args.enabled and not args.disabled:
             return print_json(request_json('/api/settings/llm'))
-        payload = {'api_base': args.api_base or '', 'api_key': args.api_key or '', 'model': args.model or ''}
+        current = request_json('/api/settings/llm').get('item', {})
+        payload = {
+            'enabled': bool(current.get('enabled')),
+            'api_base': current.get('api_base') or '',
+            'api_key': current.get('api_key') or '',
+            'model': current.get('model') or '',
+        }
+        if args.enabled:
+            payload['enabled'] = True
+        if args.disabled:
+            payload['enabled'] = False
+        if args.api_base is not None:
+            payload['api_base'] = args.api_base
+        if args.api_key is not None:
+            payload['api_key'] = args.api_key
+        if args.model is not None:
+            payload['model'] = args.model
         return print_json(request_json('/api/settings/llm', method='POST', payload=payload))
 
     if args.command == 'refresh':
