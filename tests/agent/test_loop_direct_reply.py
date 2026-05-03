@@ -78,3 +78,22 @@ async def test_low_information_chitchat_uses_direct_reply(tmp_path) -> None:
     assert out is not None
     assert out.content == "\u6709\u70b9\u610f\u601d\uff0c\u5c55\u5f00\u8bf4\u8bf4\uff1f"
     provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_capability_menu_uses_direct_reply(tmp_path) -> None:
+    provider = _provider()
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+
+    out = await loop._process_message(
+        InboundMessage(
+            channel="qq",
+            sender_id="user",
+            chat_id="chat",
+            content="\u80fd\u529b\u5217\u8868",
+        )
+    )
+
+    assert out is not None
+    assert "\u672a\u8c03\u7528 LLM" in out.content
+    provider.chat_with_retry.assert_not_awaited()
