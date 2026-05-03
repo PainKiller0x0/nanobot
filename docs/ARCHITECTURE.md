@@ -282,6 +282,7 @@ HERMES 任务调用 `hermes-check/hermes_check.py`。脚本应读取 `8093/api/s
 - 显式请求 `pro_model`、`backup_model`、`emergency_model` 时优先尊重；月预算硬熔断除外。
 - 默认模型保持 smart-routable：普通闲聊、状态查询、天气、cron、LOF/RSS 这类轻任务走默认模型。
 - 上下文压缩、记忆整理、反思、架构/review/排障等复杂任务才走 Pro。
+- 关键词只看当前最后一条用户消息，不扫描完整历史，避免历史里的“深度/架构/review”让普通闲聊误升 Pro。
 - `x-obp-purpose` / `x-obp-intent` 或请求体 `metadata.purpose` / `metadata.intent` 可作为零额外延迟 hint；不额外调用分类模型。
 - 月预算降级只抑制自动升 Pro，不影响普通默认模型请求。
 - 月预算硬熔断优先走 backup；backup 失败后才走 emergency。日常主模型超时或上游报错时，fallback 顺序仍优先 emergency，保证体验。

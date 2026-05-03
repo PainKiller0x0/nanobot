@@ -530,18 +530,18 @@ fn route_decision(
     }
 
     let explicit_pro = contains_any(&requested_model.to_lowercase(), &["pro", "reasoner"]);
-    let full_text = request_json
-        .map(extract_text)
+    let routing_text = request_json
+        .map(extract_routing_text)
         .unwrap_or_default()
         .to_lowercase();
     let pro_text_hit = PRO_TEXT_PATTERNS
         .iter()
-        .find(|pattern| full_text.contains(**pattern))
+        .find(|pattern| routing_text.contains(**pattern))
         .map(|pattern| (*pattern).to_string());
     let keyword_hit = router
         .pro_keywords
         .iter()
-        .find(|keyword| full_text.contains(&keyword.to_lowercase()))
+        .find(|keyword| routing_text.contains(&keyword.to_lowercase()))
         .cloned();
 
     let mut wants_pro = explicit_pro;
@@ -1408,6 +1408,40 @@ fn json_direct_hint(value: &Value, keys: &[&str]) -> Option<String> {
         }
     }
     None
+}
+
+fn extract_routing_text(value: &Value) -> String {
+    if let Some(messages) = value.get("messages").and_then(Value::as_array) {
+        if let Some(message) = messages
+            .iter()
+            .rev()
+            .find(|message| message_role_is(message, "user"))
+        {
+            return message_content_text(message);
+        }
+        if let Some(message) = messages.last() {
+            return message_content_text(message);
+        }
+    }
+    if let Some(input) = value.get("input") {
+        return extract_text(input);
+    }
+    extract_text(value)
+}
+
+fn message_role_is(message: &Value, expected: &str) -> bool {
+    message
+        .get("role")
+        .and_then(Value::as_str)
+        .map(|role| role.eq_ignore_ascii_case(expected))
+        .unwrap_or(false)
+}
+
+fn message_content_text(message: &Value) -> String {
+    message
+        .get("content")
+        .map(extract_text)
+        .unwrap_or_else(|| extract_text(message))
 }
 
 fn extract_text(value: &Value) -> String {
