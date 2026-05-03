@@ -82,6 +82,32 @@
           </div>
         </section>
 
+        <section class="panel p-4">
+          <div class="flex flex-wrap justify-between gap-3 mb-3">
+            <div>
+              <h2 class="font-black text-lg">外部调用</h2>
+              <p class="text-xs text-slate-500 mt-1">外部系统统一走这个 OpenAI-compatible 入口；认证继续使用 8093 代理层的 Basic 或 Bearer，面板里不直接展示密钥。</p>
+            </div>
+            <button @click="saveRouter()" class="px-3 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-sm font-bold">保存外部设置</button>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div class="subcard md:col-span-2">
+              <div class="k mb-1">API 入口</div>
+              <div class="flex flex-wrap items-center gap-2">
+                <code class="mono wrap" x-text="apiUrl"></code>
+                <button @click="copy(apiUrl)" class="btn">复制入口</button>
+                <button @click="copy(chatUrl)" class="btn">复制 Chat 接口</button>
+              </div>
+            </div>
+            <label class="flex items-center gap-2"><input type="checkbox" x-model="router.external_enabled">允许外部调用</label>
+            <label class="field md:col-span-2"><span class="field-label">外部允许模型 <button class="q" @click.prevent="help('只有这里列出的模型名可以被外部请求；每行或逗号分隔。支持 * 通配，但不建议公网开放 *。')">?</button></span><textarea x-model="externalModelText" rows="5" class="input mono" placeholder="deepseek-v4-flash&#10;deepseek-v4-pro"></textarea></label>
+            <div class="subcard md:col-span-2">
+              <div class="flex flex-wrap justify-between gap-2 mb-2"><span class="k">调用示例</span><button @click="copy(externalCurl)" class="btn">复制 curl</button></div>
+              <pre class="mono text-xs whitespace-pre-wrap wrap" x-text="externalCurl"></pre>
+            </div>
+          </div>
+        </section>
+
         <section class="panel overflow-hidden">
           <div class="p-4 border-b border-stone-200 dark:border-slate-800 flex justify-between gap-3">
             <div><h2 class="font-black text-lg">渠道池</h2><p class="text-xs text-slate-500 mt-1">同一个组里的多个渠道会自动轮询；如果一个渠道失败，会按路由顺序 fallback。</p></div>
@@ -104,7 +130,8 @@
                 </template>
               </tbody>
             </table>
-          </div>        </section>
+          </div>
+        </section>
 
         <section class="panel p-4">
           <h2 class="font-black text-lg mb-3">最近调用</h2>
@@ -163,24 +190,28 @@
   </div>
 
   <script>
-    function detectBase(){const parts=location.pathname.split('/').filter(Boolean);const idx=parts.indexOf('obp');return idx>=0?'/'+parts.slice(0,idx+1).join('/'):''}
-    function app(){return{dark:localStorage.obp_theme==='dark',notice:'',loadError:'',copied:false,lastRefresh:'-',channels:[],stats:{total:{}},router:{},pricing:{},logs:[],showForm:false,isEdit:false,form:{},keywordText:'',routerSaving:false,testing:false,testResult:null,base:detectBase(),defaultKeywords:['深度','架构','review','重构','复杂','取舍','方案','设计','迁移','推理','长文','全盘'],
-      get apiUrl(){return location.origin + this.base + '/v1'},
+    function detectBase(){const path=location.pathname.replace(/\/+/g,'/');const hit=path.match(/^(.*?\/obp)(?:\/|$)/);return hit?hit[1].replace(/(\/obp)+$/,'/obp'):''}
+    function joinPath(base,path){const joined=(String(base||'').replace(/\/+$/,'')+'/'+String(path||'').replace(/^\/+/,'')).replace(/\/+/g,'/');return joined.replace(/(\/obp)(?:\/obp)+/g,'$1')}
+    function app(){return{dark:localStorage.obp_theme==='dark',notice:'',loadError:'',copied:false,lastRefresh:'-',channels:[],stats:{total:{}},router:{},pricing:{},logs:[],showForm:false,isEdit:false,form:{},keywordText:'',externalModelText:'',routerSaving:false,testing:false,testResult:null,base:detectBase(),defaultKeywords:['深度','架构','review','重构','复杂','取舍','方案','设计','迁移','推理','长文','全盘'],defaultExternalModels:['deepseek-v4-flash','deepseek-v4-pro','MiniMax-M2.7','LongCat-Flash-Chat'],
+      get apiUrl(){return location.origin + joinPath(this.base,'/v1')},
+      get chatUrl(){return location.origin + joinPath(this.base,'/v1/chat/completions')},
+      get firstAllowedModel(){return this.splitList(this.externalModelText)[0]||this.router.default_model||'deepseek-v4-flash'},
+      get externalCurl(){return `curl ${this.chatUrl} \\\n  -H "Authorization: Bearer <OBP_PROXY_TOKEN>" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"${this.firstAllowedModel}","messages":[{"role":"user","content":"你好"}],"stream":false}'`},
       get today(){const k=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Shanghai'});return this.stats.by_day?.[k]||{}},
       get month(){const k=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Shanghai'}).slice(0,7);return this.stats.by_month?.[k]||{}},
       get successRate(){const t=this.stats.total?.requests||0;return t?Math.round((this.stats.total.success||0)*1000/t)/10+'%':'-'},
       get budgetPct(){const hard=Number(this.router.monthly_hard_limit_rmb||0);return hard?Math.min(100,Math.round((Number(this.month.cost_cny||0)/hard)*100)):0},
       get groupNames(){return [...new Set((this.channels||[]).map(c=>c.group).filter(Boolean))]},
       init(){this.refresh();setInterval(()=>this.refresh(),5000)},
-      async api(path, options={}){const prefixes=[this.base,''].filter((v,i,a)=>a.indexOf(v)===i);let last;for(const prefix of prefixes){const r=await fetch(prefix+path,{credentials:'include',cache:'no-store',...options});last=r;if(r.status!==404||!prefix)return r}return last},
-      async refresh(){try{const r=await this.api('/admin/channels');if(!r.ok)throw new Error(r.status===401?'需要登录或登录已过期':'HTTP '+r.status);const d=await r.json();this.channels=d.channels||[];this.stats=d.stats||{total:{}};this.router={...this.defaultRouter(),...(d.router||{})};this.pricing=d.pricing||{};this.logs=d.logs||[];this.keywordText=(this.router.pro_keywords&&this.router.pro_keywords.length?this.router.pro_keywords:this.defaultKeywords).join('，');this.loadError='';this.lastRefresh=new Date().toLocaleTimeString()}catch(e){this.loadError='刷新：读取失败（'+e.message+'）'}},
-      defaultRouter(){return{default_group:'deepseek',pro_group:'deepseek',emergency_group:'longcat',backup_group:'',pro_keywords:this.defaultKeywords}},
-      async saveRouter(){this.routerSaving=true;this.router.pro_keywords=this.splitList(this.keywordText);const r=await this.api('/admin/router',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.router)});this.routerSaving=false;if(!r.ok){this.help('保存失败：HTTP '+r.status);return}this.help('路由配置已保存');await this.refresh()},
+      async api(path, options={}){const prefixes=[this.base,''].filter((v,i,a)=>a.indexOf(v)===i);let last;for(const prefix of prefixes){const r=await fetch(joinPath(prefix,path),{credentials:'include',cache:'no-store',...options});last=r;if(r.status!==404||!prefix)return r}return last},
+      async refresh(){try{const r=await this.api('/admin/channels');if(!r.ok)throw new Error(r.status===401?'需要登录或登录已过期':'HTTP '+r.status);const d=await r.json();this.channels=d.channels||[];this.stats=d.stats||{total:{}};this.router={...this.defaultRouter(),...(d.router||{})};this.pricing=d.pricing||{};this.logs=d.logs||[];this.keywordText=(this.router.pro_keywords&&this.router.pro_keywords.length?this.router.pro_keywords:this.defaultKeywords).join('，');this.externalModelText=(this.router.external_allowed_models&&this.router.external_allowed_models.length?this.router.external_allowed_models:this.defaultExternalModels).join('\n');this.loadError='';this.lastRefresh=new Date().toLocaleTimeString()}catch(e){this.loadError='刷新：读取失败（'+e.message+'）'}},
+      defaultRouter(){return{default_group:'deepseek',pro_group:'deepseek',emergency_group:'longcat',backup_group:'',pro_keywords:this.defaultKeywords,external_enabled:true,external_allowed_models:this.defaultExternalModels}},
+      async saveRouter(){this.routerSaving=true;this.router.pro_keywords=this.splitList(this.keywordText);this.router.external_allowed_models=this.splitList(this.externalModelText);const r=await this.api('/admin/router',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.router)});this.routerSaving=false;if(!r.ok){this.help('保存失败：HTTP '+r.status);return}this.help('路由配置已保存');await this.refresh()},
       splitList(s){return String(s||'').split(/[，,;；\n]+/).map(x=>x.trim()).filter(Boolean)},
       fmt(v){return new Intl.NumberFormat('zh-CN').format(Math.round(Number(v||0)))},
       money(v){return '¥'+Number(v||0).toFixed(4)},
       bucketList(map){return Object.entries(map||{}).map(([name,b])=>({name,...b})).sort((a,b)=>(b.cost_cny||0)-(a.cost_cny||0)||((b.requests||0)-(a.requests||0))).slice(0,8)},
-      async copy(t){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(t)}else{const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();document.execCommand('copy');ta.remove()}this.help('已复制 API 入口')}catch(e){this.help('复制失败，可以手动选中 API 入口')}},
+      async copy(t){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(t)}else{const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();document.execCommand('copy');ta.remove()}this.help('已复制到剪贴板')}catch(e){this.help('复制失败，可以手动选中后复制')}},
       help(t){this.notice=t;clearTimeout(this._noticeTimer);this._noticeTimer=setTimeout(()=>this.notice='',4200)},
       typeLabel(t){return {openai:'OpenAI 兼容',anthropic:'Anthropic API',other:'其他'}[t||'openai']||t},
       openAdd(){this.isEdit=false;this.form={};this.applyPreset('longcat');this.testResult=null;this.showForm=true},

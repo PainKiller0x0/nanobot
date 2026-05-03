@@ -222,6 +222,53 @@ def _is_direct_openai_base(api_base: str | None) -> bool:
     return "api.openai.com" in normalized and "openrouter" not in normalized
 
 
+_OBP_ROUTE_HEADER_NAMES = {
+    "route": "x-obp-route",
+    "group": "x-obp-group",
+    "requested_model": "x-obp-requested-model",
+    "actual_model": "x-obp-actual-model",
+    "channel": "x-obp-channel",
+    "reason": "x-obp-reason",
+}
+
+
+def _read_header(headers: Any, name: str) -> str | None:
+    if headers is None:
+        return None
+    getter = getattr(headers, "get", None)
+    if callable(getter):
+        value = getter(name) or getter(name.lower()) or getter(name.title())
+    elif isinstance(headers, dict):
+        value = headers.get(name) or headers.get(name.lower()) or headers.get(name.title())
+    else:
+        value = None
+    if value is None:
+        return None
+    return str(value)
+
+
+def _log_obp_route_headers(source: Any) -> None:
+    headers = getattr(source, "headers", None)
+    if headers is None:
+        response = getattr(source, "response", None) or getattr(source, "_response", None)
+        headers = getattr(response, "headers", None)
+    values = {
+        key: _read_header(headers, header_name)
+        for key, header_name in _OBP_ROUTE_HEADER_NAMES.items()
+    }
+    if not any(values.values()):
+        return
+    logger.info(
+        "OBP model route: requested={} actual={} channel={} route={} group={} reason={}",
+        values.get("requested_model") or "-",
+        values.get("actual_model") or "-",
+        values.get("channel") or "-",
+        values.get("route") or "-",
+        values.get("group") or "-",
+        values.get("reason") or "-",
+    )
+
+
 def _responses_circuit_key(
     model: str | None,
     default_model: str,
@@ -1154,6 +1201,22 @@ class OpenAICompatProvider(LLMProvider):
             **OpenAICompatProvider._extract_error_metadata(e),
         )
 
+    async def _create_chat_completion_with_route_log(self, kwargs: dict[str, Any]) -> Any:
+        """Create a chat completion and log OBP routing headers when present."""
+        completions = self._client.chat.completions
+        raw_endpoint = getattr(completions, "with_raw_response", None)
+        if raw_endpoint is None:
+            result = await completions.create(**kwargs)
+            _log_obp_route_headers(result)
+            return result
+
+        raw_response = await raw_endpoint.create(**kwargs)
+        _log_obp_route_headers(raw_response)
+        parsed = raw_response.parse()
+        if hasattr(parsed, "__await__"):
+            parsed = await parsed
+        return parsed
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -1192,7 +1255,8 @@ class OpenAICompatProvider(LLMProvider):
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,
             )
-            return self._parse(await self._client.chat.completions.create(**kwargs))
+            result = await self._create_chat_completion_with_route_log(kwargs)
+            return self._parse(result)
         except Exception as e:
             return self._handle_error(e, spec=self._spec, api_base=self.api_base)
 
@@ -1257,7 +1321,7 @@ class OpenAICompatProvider(LLMProvider):
             )
             kwargs["stream"] = True
             kwargs["stream_options"] = {"include_usage": True}
-            stream = await self._client.chat.completions.create(**kwargs)
+            stream = await self._create_chat_completion_with_route_log(kwargs)
             chunks: list[Any] = []
             stream_iter = stream.__aiter__()
             while True:

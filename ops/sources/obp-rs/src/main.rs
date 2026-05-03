@@ -9,7 +9,8 @@ use crate::proxy::{handle_proxy, ProxyState};
 use crate::stats::{load_stats, pricing_snapshot, save_stats, UsageStats};
 use axum::{
     extract::{Path, State},
-    response::Html,
+    http::header,
+    response::{Html, IntoResponse},
     routing::{get, post, put},
     Json, Router,
 };
@@ -72,8 +73,14 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn dashboard() -> Html<&'static str> {
-    Html(include_str!("index.html"))
+async fn dashboard() -> impl IntoResponse {
+    (
+        [
+            (header::CACHE_CONTROL, "no-store, max-age=0"),
+            (header::PRAGMA, "no-cache"),
+        ],
+        Html(include_str!("index.html")),
+    )
 }
 
 async fn get_channels(State(state): State<Arc<ProxyState>>) -> Json<serde_json::Value> {

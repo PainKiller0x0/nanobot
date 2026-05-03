@@ -133,6 +133,8 @@ fn lookup_mapping(mapping: Option<&Value>, model: &str) -> Option<String> {
 pub struct RouterConfig {
     pub enabled: bool,
     pub dry_run: bool,
+    pub external_enabled: bool,
+    pub external_allowed_models: Vec<String>,
     pub default_model: String,
     pub pro_model: String,
     pub emergency_model: String,
@@ -155,6 +157,13 @@ impl Default for RouterConfig {
         Self {
             enabled: true,
             dry_run: false,
+            external_enabled: true,
+            external_allowed_models: vec![
+                "deepseek-v4-flash".to_string(),
+                "deepseek-v4-pro".to_string(),
+                "MiniMax-M2.7".to_string(),
+                "LongCat-Flash-Chat".to_string(),
+            ],
             default_model: "deepseek-v4-flash".to_string(),
             pro_model: "deepseek-v4-pro".to_string(),
             emergency_model: "LongCat-Flash-Chat".to_string(),

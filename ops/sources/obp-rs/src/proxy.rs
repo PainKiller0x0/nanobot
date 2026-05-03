@@ -73,11 +73,21 @@ pub async fn handle_proxy(
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
+    let router = state.router.lock().await.clone();
+    if !router.external_enabled {
+        return error_response(StatusCode::FORBIDDEN, "external_access_disabled");
+    }
+    if !external_model_allowed(&router, &requested_model) {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            &format!("model_not_allowed: {}", requested_model),
+        );
+    }
+
     let channels = state.channels.lock().await.clone();
     if channels.is_empty() {
         return (StatusCode::NOT_FOUND, "No channels available").into_response();
     }
-    let router = state.router.lock().await.clone();
     let stats = state.stats.lock().await.clone();
     let decision = route_decision(&router, &stats, request_json.as_ref(), &requested_model);
     let attempts = build_attempts(&state, &channels, &router, &decision).await;
@@ -230,6 +240,56 @@ pub async fn handle_proxy(
         )
             .into_response()
     })
+}
+
+fn error_response(status: StatusCode, message: &str) -> axum::response::Response {
+    (
+        status,
+        [("content-type", "application/json; charset=utf-8")],
+        serde_json::json!({
+            "error": {
+                "message": message,
+                "type": "obp_router_error",
+            }
+        })
+        .to_string(),
+    )
+        .into_response()
+}
+
+fn external_model_allowed(router: &RouterConfig, model: &str) -> bool {
+    let allowed = &router.external_allowed_models;
+    if allowed.is_empty() {
+        return true;
+    }
+    let target = model.trim().to_lowercase();
+    allowed
+        .iter()
+        .map(|item| item.trim())
+        .filter(|item| !item.is_empty())
+        .any(|pattern| model_pattern_matches(pattern, &target))
+}
+
+fn model_pattern_matches(pattern: &str, model: &str) -> bool {
+    let pattern = pattern.to_lowercase();
+    if pattern == "*" {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return pattern == model;
+    }
+    let parts: Vec<&str> = pattern.split('*').filter(|part| !part.is_empty()).collect();
+    if parts.is_empty() {
+        return true;
+    }
+    let mut rest = model;
+    for part in parts {
+        let Some(idx) = rest.find(part) else {
+            return false;
+        };
+        rest = &rest[idx + part.len()..];
+    }
+    true
 }
 
 fn route_decision(

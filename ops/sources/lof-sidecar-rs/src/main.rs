@@ -877,6 +877,7 @@ async fn reverse_proxy(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
+    let response_headers = resp.headers().clone();
     let bytes = match resp.bytes().await {
         Ok(v) => v,
         Err(_) => return response_with_status(StatusCode::BAD_GATEWAY, "upstream read failed"),
@@ -886,9 +887,10 @@ async fn reverse_proxy(
         match String::from_utf8(bytes.to_vec()) {
             Ok(text) => {
                 let rewritten = rewrite_proxy_text(text, prefix);
-                return Response::builder()
+                let builder = Response::builder()
                     .status(status)
-                    .header(header::CONTENT_TYPE, content_type)
+                    .header(header::CONTENT_TYPE, content_type);
+                return forward_proxy_response_headers(builder, &response_headers)
                     .body(Body::from(rewritten))
                     .unwrap_or_else(|_| {
                         response_with_status(StatusCode::BAD_GATEWAY, "response build failed")
@@ -898,11 +900,25 @@ async fn reverse_proxy(
         }
     }
 
-    Response::builder()
+    let builder = Response::builder()
         .status(status)
-        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_TYPE, content_type);
+    forward_proxy_response_headers(builder, &response_headers)
         .body(Body::from(bytes))
         .unwrap_or_else(|_| response_with_status(StatusCode::BAD_GATEWAY, "response build failed"))
+}
+
+fn forward_proxy_response_headers(
+    mut builder: axum::http::response::Builder,
+    headers: &reqwest::header::HeaderMap,
+) -> axum::http::response::Builder {
+    for (name, value) in headers.iter() {
+        let name_str = name.as_str().to_ascii_lowercase();
+        if name_str.starts_with("x-obp-") || name_str == "cache-control" || name_str == "pragma" {
+            builder = builder.header(name, value);
+        }
+    }
+    builder
 }
 
 fn response_with_status(status: StatusCode, body: &'static str) -> Response {
