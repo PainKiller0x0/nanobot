@@ -71,7 +71,7 @@
 | `notify` | Notify Bridge | systemd | `8094` | 无 | cron 调度、重试状态、QQ 通知分发 |
 | `trend` | Trend Radar | systemd | `8095` | `/trends/` | NewsNow 热榜、搜索、话题分析、MCP 风格工具 |
 | `reflexio` | Reflexio | systemd | `8081` | `/reflexio/` | 记忆和反思看板 |
-| `obp` | OBP Bridge | systemd | `8000` | `/obp/` | 兜底桥、回调和控制台 |
+| `obp` | OBP Bridge | systemd | `8000` | `/obp/` | 模型网关、双协议 API、成本和兜底控制台 |
 | `podman-public-rule` | Port Guard | systemd | n/a | 无 | 阻断旧业务端口公网访问 |
 
 ## 目录布局
@@ -268,8 +268,23 @@ HERMES 任务调用 `hermes-check/hermes_check.py`。脚本应读取 `8093/api/s
 
 ### `obp-rs`
 
-- OpenAI-compatible/failover 桥和回调控制台。
+- 模型网关、成本统计、fallback 控制台。
 - 公网访问必须经 `8093/obp`，并保留认证或网络限制。
+- 外部 OpenAI 兼容入口：`/obp/v1/chat/completions`。
+- 外部 Anthropic 兼容入口：`/obp/anthropic/v1/messages`。
+- client API 协议和 upstream 渠道协议解耦：同一个外部请求可以路由到 OpenAI-compatible 或 Anthropic 渠道；非流式响应会做基础格式转换。
+- 流式请求只做同协议透传；跨协议 streaming 暂不转换，避免引入额外延迟和不完整 SSE 语义。
+- 每次响应带 `x-obp-route`、`x-obp-group`、`x-obp-requested-model`、`x-obp-actual-model`、`x-obp-channel`、`x-obp-reason`。Nanobot provider 只在 OBP endpoint 上读取这些头并写入 `podman logs -f nanobot-cage`。
+
+路由策略原则：
+
+- 不用“累计 token / 字符数 / 消息数”自动升 Pro。长度只能说明成本压力，不能说明任务难度。
+- 显式请求 `pro_model`、`backup_model`、`emergency_model` 时优先尊重；月预算硬熔断除外。
+- 默认模型保持 smart-routable：普通闲聊、状态查询、天气、cron、LOF/RSS 这类轻任务走默认模型。
+- 上下文压缩、记忆整理、反思、架构/review/排障等复杂任务才走 Pro。
+- `x-obp-purpose` / `x-obp-intent` 或请求体 `metadata.purpose` / `metadata.intent` 可作为零额外延迟 hint；不额外调用分类模型。
+- 月预算降级只抑制自动升 Pro，不影响普通默认模型请求。
+- 月预算硬熔断优先走 backup；backup 失败后才走 emergency。日常主模型超时或上游报错时，fallback 顺序仍优先 emergency，保证体验。
 
 ## MCP 和 AI 分析路径
 

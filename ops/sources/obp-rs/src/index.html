@@ -29,7 +29,7 @@
         <div>
           <div class="text-xs font-black tracking-[.22em] text-teal-700 dark:text-teal-300">MODEL ROUTER</div>
           <h1 class="text-3xl md:text-4xl font-black tracking-tight mt-1">OBP 智能模型网关</h1>
-          <p class="text-sm text-slate-500 dark:text-slate-400 mt-2">默认走 Flash 省钱，复杂任务升级 Pro，异常时回落 LongCat/保底模型；渠道可以按组做轮询均衡。</p>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mt-2">默认走 Flash 省钱，压缩/记忆/复杂任务才升级 Pro；主模型异常先应急，预算熔断先保底，渠道可以按组轮询均衡。</p>
         </div>
         <div class="flex flex-wrap items-start gap-2">
           <button @click="refresh()" class="px-3 py-2 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-sm font-bold">刷新</button>
@@ -67,18 +67,20 @@
             <label class="flex items-center gap-2"><input type="checkbox" x-model="router.dry_run">Dry-run 只记录不切换</label>
             <label class="field"><span class="field-label">默认模型 <button class="q" @click.prevent="help('普通闲聊和轻任务优先使用的模型名，比如 deepseek-v4-flash。')">?</button></span><input x-model="router.default_model" class="input mono"></label>
             <label class="field"><span class="field-label">默认组 <button class="q" @click.prevent="help('默认模型优先走的渠道组。同组多个渠道会轮询均衡，推荐 deepseek。')">?</button></span><input x-model="router.default_group" class="input mono" placeholder="deepseek"></label>
-            <label class="field"><span class="field-label">高级模型 <button class="q" @click.prevent="help('复杂任务、长上下文、命中 Pro 关键词时使用的模型，比如 deepseek-v4-pro。')">?</button></span><input x-model="router.pro_model" class="input mono"></label>
+            <label class="field"><span class="field-label">高级模型 <button class="q" @click.prevent="help('上下文压缩、记忆整理、架构/review/排障等复杂任务才使用的模型，比如 deepseek-v4-pro；不会再因为上下文变长就自动升级。')">?</button></span><input x-model="router.pro_model" class="input mono"></label>
             <label class="field"><span class="field-label">高级组 <button class="q" @click.prevent="help('高级模型优先走的渠道组，可以和默认组相同，也可以单独建 pro 池。')">?</button></span><input x-model="router.pro_group" class="input mono" placeholder="deepseek"></label>
-            <label class="field"><span class="field-label">应急模型 <button class="q" @click.prevent="help('预算熔断或上游失败时兜底用的模型，目前建议 LongCat-Flash-Chat。')">?</button></span><input x-model="router.emergency_model" class="input mono"></label>
+            <label class="field"><span class="field-label">应急模型 <button class="q" @click.prevent="help('日常调用里主模型超时或上游报错时使用，目标是快速救场，目前建议 LongCat-Flash-Chat。')">?</button></span><input x-model="router.emergency_model" class="input mono"></label>
             <label class="field"><span class="field-label">应急组 <button class="q" @click.prevent="help('应急模型优先走的渠道组；现有 LongCat 渠道已放在 longcat 组。')">?</button></span><input x-model="router.emergency_group" class="input mono" placeholder="longcat"></label>
-            <label class="field"><span class="field-label">保底模型 <button class="q" @click.prevent="help('所有主要渠道都失败后才尝试的最后一层兜底模型。')">?</button></span><input x-model="router.backup_model" class="input mono"></label>
+            <label class="field"><span class="field-label">保底模型 <button class="q" @click.prevent="help('月预算熔断后优先使用的省钱/固定成本模型；它失败后才进入应急模型。')">?</button></span><input x-model="router.backup_model" class="input mono"></label>
             <label class="field"><span class="field-label">保底组 <button class="q" @click.prevent="help('保底模型对应的渠道组；没有单独保底渠道时可以留空。')">?</button></span><input x-model="router.backup_group" class="input mono"></label>
-            <label class="field"><span class="field-label">升级 Pro 字符数 <button class="q" @click.prevent="help('单次请求文本长度超过这个阈值，就认为任务偏重，自动走高级模型。')">?</button></span><input x-model.number="router.pro_prompt_chars" type="number" class="input"></label>
-            <label class="field"><span class="field-label">升级 Pro 消息数 <button class="q" @click.prevent="help('上下文消息数量超过这个阈值，也会自动走高级模型。')">?</button></span><input x-model.number="router.pro_message_count" type="number" class="input"></label>
+            <div class="subcard md:col-span-2">
+              <div class="font-black mb-1">无感切换策略</div>
+              <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">不再按字符数或消息数自动升 Pro，避免聊着聊着莫名变贵。升级只看显式模型、任务 hint、压缩/记忆/复杂任务关键词；不额外调用分类模型，所以不会增加体感延迟。</p>
+            </div>
             <label class="field"><span class="field-label">月预算提醒（元） <button class="q" @click.prevent="help('本月累计成本超过这个值时，看板会提醒；它本身不改变模型。')">?</button></span><input x-model.number="router.monthly_warn_rmb" type="number" step="0.1" class="input"></label>
             <label class="field"><span class="field-label">月预算降级（元） <button class="q" @click.prevent="help('本月累计成本超过这个值后，不再自动升 Pro，优先走默认模型/默认组。')">?</button></span><input x-model.number="router.monthly_downgrade_rmb" type="number" step="0.1" class="input"></label>
-            <label class="field"><span class="field-label">月预算熔断（元） <button class="q" @click.prevent="help('本月累计成本超过这个值后，强制走应急模型/应急组，防止费用失控。')">?</button></span><input x-model.number="router.monthly_hard_limit_rmb" type="number" step="0.1" class="input"></label>
-            <label class="field md:col-span-2"><span class="field-label">Pro 关键词 <button class="q" @click.prevent="help('请求里出现这些词时，自动认为任务更复杂并升级高级模型。默认：' + defaultKeywords.join('、'))">?</button></span><input x-model="keywordText" @change="router.pro_keywords=splitList(keywordText)" class="input" :placeholder="defaultKeywords.join('，')"><div class="mt-2 flex flex-wrap gap-1"><template x-for="kw in splitList(keywordText)" :key="kw"><span class="badge" x-text="kw"></span></template></div></label>
+            <label class="field"><span class="field-label">月预算熔断（元） <button class="q" @click.prevent="help('本月累计成本超过这个值后，优先走保底模型/保底组；保底失败后才走应急模型，避免 emergency 被日常预算耗尽。')">?</button></span><input x-model.number="router.monthly_hard_limit_rmb" type="number" step="0.1" class="input"></label>
+            <label class="field md:col-span-2"><span class="field-label">Pro 关键词 <button class="q" @click.prevent="help('只用于判断任务复杂度，不看上下文长度。建议保留架构、review、重构、排障、取舍、压缩、记忆、反思这类明确复杂任务词。默认：' + defaultKeywords.join('、'))">?</button></span><input x-model="keywordText" @change="router.pro_keywords=splitList(keywordText)" class="input" :placeholder="defaultKeywords.join('，')"><div class="mt-2 flex flex-wrap gap-1"><template x-for="kw in splitList(keywordText)" :key="kw"><span class="badge" x-text="kw"></span></template></div></label>
           </div>
         </section>
 
@@ -195,7 +197,7 @@
   <script>
     function detectBase(){const path=location.pathname.replace(/\/+/g,'/');const hit=path.match(/^(.*?\/obp)(?:\/|$)/);return hit?hit[1].replace(/(\/obp)+$/,'/obp'):''}
     function joinPath(base,path){const joined=(String(base||'').replace(/\/+$/,'')+'/'+String(path||'').replace(/^\/+/,'')).replace(/\/+/g,'/');return joined.replace(/(\/obp)(?:\/obp)+/g,'$1')}
-    function app(){return{dark:localStorage.obp_theme==='dark',notice:'',loadError:'',copied:false,lastRefresh:'-',channels:[],stats:{total:{}},router:{},pricing:{},logs:[],showForm:false,isEdit:false,form:{},keywordText:'',externalModelText:'',routerSaving:false,testing:false,testResult:null,base:detectBase(),defaultKeywords:['深度','架构','review','重构','复杂','取舍','方案','设计','迁移','推理','长文','全盘'],defaultExternalModels:['deepseek-v4-flash','deepseek-v4-pro','MiniMax-M2.7','LongCat-Flash-Chat'],
+    function app(){return{dark:localStorage.obp_theme==='dark',notice:'',loadError:'',copied:false,lastRefresh:'-',channels:[],stats:{total:{}},router:{},pricing:{},logs:[],showForm:false,isEdit:false,form:{},keywordText:'',externalModelText:'',routerSaving:false,testing:false,testResult:null,base:detectBase(),defaultKeywords:['深度','架构','review','重构','复杂','取舍','设计','迁移','推理','长文','全盘','排障','压缩','记忆','反思'],defaultExternalModels:['deepseek-v4-flash','deepseek-v4-pro','MiniMax-M2.7','LongCat-Flash-Chat'],
       get apiUrl(){return location.origin + joinPath(this.base,'/v1')},
       get chatUrl(){return location.origin + joinPath(this.base,'/v1/chat/completions')},
       get anthropicUrl(){return location.origin + joinPath(this.base,'/anthropic/v1/messages')},

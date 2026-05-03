@@ -143,6 +143,8 @@ pub struct RouterConfig {
     pub pro_group: String,
     pub emergency_group: String,
     pub backup_group: String,
+    // Legacy compatibility fields. Routing no longer upgrades to Pro only
+    // because the prompt or message history is long.
     pub pro_prompt_chars: usize,
     pub pro_message_count: usize,
     pub monthly_warn_rmb: f64,
@@ -172,8 +174,8 @@ impl Default for RouterConfig {
             pro_group: "deepseek".to_string(),
             emergency_group: "longcat".to_string(),
             backup_group: String::new(),
-            pro_prompt_chars: 18_000,
-            pro_message_count: 14,
+            pro_prompt_chars: 0,
+            pro_message_count: 0,
             monthly_warn_rmb: 10.0,
             monthly_downgrade_rmb: 20.0,
             monthly_hard_limit_rmb: 30.0,
@@ -185,12 +187,14 @@ impl Default for RouterConfig {
                 "重构".to_string(),
                 "复杂".to_string(),
                 "取舍".to_string(),
-                "方案".to_string(),
                 "设计".to_string(),
                 "迁移".to_string(),
                 "推理".to_string(),
                 "长文".to_string(),
                 "全盘".to_string(),
+                "压缩".to_string(),
+                "记忆".to_string(),
+                "反思".to_string(),
             ],
         }
     }

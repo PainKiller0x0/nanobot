@@ -3,7 +3,7 @@ use crate::stats::{save_stats, RequestLog, TokenUsage, UsageStats};
 use axum::{
     body::{to_bytes, Body},
     extract::State,
-    http::{header, HeaderName, Request, Response, StatusCode},
+    http::{header, HeaderMap, HeaderName, Request, Response, StatusCode},
     response::IntoResponse,
 };
 use reqwest::{Body as ReqBody, Client, RequestBuilder};
@@ -88,6 +88,110 @@ impl ApiProtocol {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct RouteHints {
+    purpose: String,
+    intent: String,
+}
+
+impl RouteHints {
+    fn from_request(headers: &HeaderMap, request_json: Option<&Value>) -> Self {
+        Self {
+            purpose: first_non_empty(&[
+                header_hint(headers, "x-obp-purpose"),
+                json_hint(request_json, &["obp_purpose", "x_obp_purpose", "purpose"]),
+            ]),
+            intent: first_non_empty(&[
+                header_hint(headers, "x-obp-intent"),
+                json_hint(request_json, &["obp_intent", "x_obp_intent", "intent"]),
+            ]),
+        }
+    }
+
+    fn pro_reason(&self) -> Option<String> {
+        for (label, value) in [
+            ("purpose", self.purpose.as_str()),
+            ("intent", self.intent.as_str()),
+        ] {
+            if hint_matches(value, PRO_HINTS) {
+                return Some(format!("{} hint matched: {}", label, value));
+            }
+        }
+        None
+    }
+
+    fn light_reason(&self) -> Option<String> {
+        for (label, value) in [
+            ("purpose", self.purpose.as_str()),
+            ("intent", self.intent.as_str()),
+        ] {
+            if hint_matches(value, LIGHTWEIGHT_HINTS) {
+                return Some(format!("{} hint keeps default: {}", label, value));
+            }
+        }
+        None
+    }
+}
+
+const PRO_HINTS: &[&str] = &[
+    "compact",
+    "compression",
+    "summarize",
+    "summary",
+    "memory",
+    "reflection",
+    "reflexio",
+    "dream",
+    "review",
+    "code_review",
+    "architecture",
+    "design",
+    "migration",
+    "reasoning",
+    "analysis",
+    "diagnose",
+    "troubleshoot",
+    "root_cause",
+];
+
+const LIGHTWEIGHT_HINTS: &[&str] = &[
+    "status",
+    "health",
+    "weather",
+    "cron",
+    "schedule",
+    "lof",
+    "rss",
+    "quote",
+    "simple",
+    "simple_chat",
+    "fast_chat",
+];
+
+const PRO_TEXT_PATTERNS: &[&str] = &[
+    "context compression",
+    "context summary",
+    "conversation summary",
+    "memory consolidation",
+    "compact conversation",
+    "summarize conversation",
+    "summarize this conversation",
+    "summarize the conversation",
+    "conversation so far",
+    "consolidate memory",
+    "code review",
+    "review existing",
+    "root cause",
+    "上下文压缩",
+    "压缩上下文",
+    "总结对话",
+    "对话总结",
+    "记忆整理",
+    "代码审查",
+    "根因",
+    "排障",
+];
+
 pub async fn handle_openai_proxy(
     State(state): State<Arc<ProxyState>>,
     req: Request<Body>,
@@ -132,6 +236,7 @@ async fn handle_proxy(
         .and_then(|v| v.get("stream"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let route_hints = RouteHints::from_request(&parts.headers, request_json.as_ref());
 
     let router = state.router.lock().await.clone();
     if !router.external_enabled {
@@ -149,7 +254,13 @@ async fn handle_proxy(
         return (StatusCode::NOT_FOUND, "No channels available").into_response();
     }
     let stats = state.stats.lock().await.clone();
-    let decision = route_decision(&router, &stats, request_json.as_ref(), &requested_model);
+    let decision = route_decision(
+        &router,
+        &stats,
+        request_json.as_ref(),
+        &requested_model,
+        &route_hints,
+    );
     let attempts = build_attempts(&state, &channels, &router, &decision, protocol).await;
     if attempts.is_empty() {
         record_failure(
@@ -192,6 +303,7 @@ async fn handle_proxy(
                 && name != "authorization"
                 && name != "content-length"
                 && !name.as_str().eq_ignore_ascii_case("x-api-key")
+                && !name.as_str().to_ascii_lowercase().starts_with("x-obp-")
             {
                 target_req = target_req.header(name, value);
             }
@@ -380,6 +492,7 @@ fn route_decision(
     stats: &UsageStats,
     request_json: Option<&Value>,
     requested_model: &str,
+    hints: &RouteHints,
 ) -> RouteDecision {
     if !router.enabled {
         return RouteDecision {
@@ -417,16 +530,14 @@ fn route_decision(
     }
 
     let explicit_pro = contains_any(&requested_model.to_lowercase(), &["pro", "reasoner"]);
-    let prompt_chars = request_json.map(estimate_prompt_chars).unwrap_or(0);
-    let message_count = request_json
-        .and_then(|v| v.get("messages"))
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0);
     let full_text = request_json
         .map(extract_text)
         .unwrap_or_default()
         .to_lowercase();
+    let pro_text_hit = PRO_TEXT_PATTERNS
+        .iter()
+        .find(|pattern| full_text.contains(**pattern))
+        .map(|pattern| (*pattern).to_string());
     let keyword_hit = router
         .pro_keywords
         .iter()
@@ -439,56 +550,60 @@ fn route_decision(
     } else {
         "default lightweight route".to_string()
     };
-    if !wants_pro && prompt_chars >= router.pro_prompt_chars {
-        wants_pro = true;
-        reason = format!(
-            "prompt chars {} >= {}",
-            prompt_chars, router.pro_prompt_chars
-        );
-    }
-    if !wants_pro && message_count >= router.pro_message_count {
-        wants_pro = true;
-        reason = format!(
-            "message count {} >= {}",
-            message_count, router.pro_message_count
-        );
+    if !wants_pro {
+        if let Some(pro_reason) = hints.pro_reason() {
+            wants_pro = true;
+            reason = pro_reason;
+        }
     }
     if !wants_pro {
+        if let Some(light_reason) = hints.light_reason() {
+            reason = light_reason;
+        }
+    }
+    if !wants_pro && !hint_matches(&hints.intent, LIGHTWEIGHT_HINTS) {
+        if let Some(pattern) = pro_text_hit {
+            wants_pro = true;
+            reason = format!("task pattern matched: {}", pattern);
+        }
+    }
+    if !wants_pro && !hint_matches(&hints.intent, LIGHTWEIGHT_HINTS) {
         if let Some(keyword) = keyword_hit {
             wants_pro = true;
             reason = format!("keyword matched: {}", keyword);
         }
     }
 
-    let mut decision =
-        if router.monthly_downgrade_rmb > 0.0 && monthly_cost >= router.monthly_downgrade_rmb {
-            RouteDecision {
-                requested_model: requested_model.to_string(),
-                desired_model: router.default_model.clone(),
-                role: "default".to_string(),
-                group: group_for_role(router, "default"),
-                reason: format!(
-                    "monthly downgrade threshold reached {:.2} CNY",
-                    monthly_cost
-                ),
-            }
-        } else if wants_pro {
-            RouteDecision {
-                requested_model: requested_model.to_string(),
-                desired_model: router.pro_model.clone(),
-                role: "pro".to_string(),
-                group: group_for_role(router, "pro"),
-                reason,
-            }
-        } else {
-            RouteDecision {
-                requested_model: requested_model.to_string(),
-                desired_model: router.default_model.clone(),
-                role: "default".to_string(),
-                group: group_for_role(router, "default"),
-                reason,
-            }
-        };
+    let budget_downgrade =
+        router.monthly_downgrade_rmb > 0.0 && monthly_cost >= router.monthly_downgrade_rmb;
+    let mut decision = if budget_downgrade && wants_pro {
+        RouteDecision {
+            requested_model: requested_model.to_string(),
+            desired_model: router.default_model.clone(),
+            role: "default".to_string(),
+            group: group_for_role(router, "default"),
+            reason: format!(
+                "monthly downgrade threshold reached {:.2} CNY; suppressed pro route ({})",
+                monthly_cost, reason
+            ),
+        }
+    } else if wants_pro {
+        RouteDecision {
+            requested_model: requested_model.to_string(),
+            desired_model: router.pro_model.clone(),
+            role: "pro".to_string(),
+            group: group_for_role(router, "pro"),
+            reason,
+        }
+    } else {
+        RouteDecision {
+            requested_model: requested_model.to_string(),
+            desired_model: router.default_model.clone(),
+            role: "default".to_string(),
+            group: group_for_role(router, "default"),
+            reason,
+        }
+    };
 
     if router.dry_run {
         decision.reason = format!(
@@ -748,16 +863,28 @@ fn rewrite_body_for_upstream(
     upstream_protocol: ApiProtocol,
 ) -> Vec<u8> {
     match (client_protocol, upstream_protocol) {
-        (ApiProtocol::OpenAI, ApiProtocol::OpenAI)
-        | (ApiProtocol::Anthropic, ApiProtocol::Anthropic) => rewrite_model(body, model),
+        (ApiProtocol::OpenAI, ApiProtocol::OpenAI) => rewrite_openai_model(body, model),
+        (ApiProtocol::Anthropic, ApiProtocol::Anthropic) => rewrite_model(body, model),
         (ApiProtocol::Anthropic, ApiProtocol::OpenAI) => anthropic_request_to_openai(body, model),
         (ApiProtocol::OpenAI, ApiProtocol::Anthropic) => openai_request_to_anthropic(body, model),
     }
 }
 
+fn rewrite_openai_model(body: &[u8], model: &str) -> Vec<u8> {
+    let Ok(mut value) = serde_json::from_slice::<Value>(body) else {
+        return body.to_vec();
+    };
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("model".to_string(), Value::String(model.to_string()));
+        apply_openai_model_defaults(&mut value, model);
+        return serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec());
+    }
+    body.to_vec()
+}
+
 fn anthropic_request_to_openai(body: &[u8], model: &str) -> Vec<u8> {
     let Ok(value) = serde_json::from_slice::<Value>(body) else {
-        return rewrite_model(body, model);
+        return rewrite_openai_model(body, model);
     };
     let mut messages = Vec::new();
     if let Some(system) = value.get("system") {
@@ -789,7 +916,21 @@ fn anthropic_request_to_openai(body: &[u8], model: &str) -> Vec<u8> {
             ("stop_sequences", "stop"),
         ],
     );
-    json_bytes_or(&out, rewrite_model(body, model))
+    apply_openai_model_defaults(&mut out, model);
+    json_bytes_or(&out, rewrite_openai_model(body, model))
+}
+
+fn apply_openai_model_defaults(value: &mut Value, model: &str) {
+    if !model.to_lowercase().contains("deepseek-v4-pro") {
+        return;
+    }
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    obj.entry("thinking".to_string())
+        .or_insert_with(|| serde_json::json!({"type": "enabled"}));
+    obj.entry("reasoning_effort".to_string())
+        .or_insert_with(|| Value::String("high".to_string()));
 }
 
 fn openai_request_to_anthropic(body: &[u8], model: &str) -> Vec<u8> {
@@ -1215,8 +1356,58 @@ fn contains_any(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| text.contains(needle))
 }
 
-fn estimate_prompt_chars(value: &Value) -> usize {
-    extract_text(value).chars().count()
+fn hint_matches(value: &str, patterns: &[&str]) -> bool {
+    let value = value.trim().to_lowercase();
+    !value.is_empty()
+        && patterns
+            .iter()
+            .any(|pattern| value.contains(&pattern.to_lowercase()))
+}
+
+fn first_non_empty(values: &[String]) -> String {
+    values
+        .iter()
+        .find(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_lowercase())
+        .unwrap_or_default()
+}
+
+fn header_hint(headers: &HeaderMap, name: &str) -> String {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().to_lowercase())
+        .unwrap_or_default()
+}
+
+fn json_hint(value: Option<&Value>, keys: &[&str]) -> String {
+    let Some(value) = value else {
+        return String::new();
+    };
+    if let Some(found) = json_direct_hint(value, keys) {
+        return found;
+    }
+    for container in ["metadata", "extra_body", "obp"] {
+        if let Some(found) = value
+            .get(container)
+            .and_then(|inner| json_direct_hint(inner, keys))
+        {
+            return found;
+        }
+    }
+    String::new()
+}
+
+fn json_direct_hint(value: &Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(text) = value.get(*key).and_then(Value::as_str) {
+            let normalized = text.trim().to_lowercase();
+            if !normalized.is_empty() {
+                return Some(normalized);
+            }
+        }
+    }
+    None
 }
 
 fn extract_text(value: &Value) -> String {
