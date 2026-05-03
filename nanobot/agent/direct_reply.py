@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent import memory_reply
 from nanobot.agent.capability_reply import (
     format_capability_menu,
     format_capability_status,
@@ -72,6 +73,12 @@ def build_direct_reply(
 ) -> OutboundMessage | None:
     """Return a deterministic reply for cheap status/chitchat intents, if matched."""
     text = (msg.content or "").strip()
+    if memory := memory_reply.extract_memory_to_save(text):
+        return _outbound(msg, memory_reply.remember_memory(memory, msg.sender_id or msg.chat_id))
+    if memory_reply.is_memory_status_query(text):
+        return _outbound(msg, memory_reply.format_memory_status())
+    if memory_query := memory_reply.extract_memory_search(text):
+        return _outbound(msg, memory_reply.search_memory(memory_query))
     if _is_memory_query(text):
         return _outbound(msg, _format_memory_report(model, start_time, last_usage or {}))
     if _is_capability_menu_query(text):

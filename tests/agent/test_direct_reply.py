@@ -1,4 +1,4 @@
-from nanobot.agent import capability_reply
+from nanobot.agent import capability_reply, memory_reply
 from nanobot.agent.direct_reply import build_direct_reply
 from nanobot.bus.events import InboundMessage
 
@@ -167,6 +167,55 @@ def test_evolution_query_uses_evolution_api_without_llm(monkeypatch) -> None:
     assert "\u8fdb\u5316\u62a5\u544a" in out.content
     assert "\u76f4\u8fde\u56de\u590d\u63d0\u901f" in out.content
     assert out.metadata["_direct_reply"] is True
+
+
+def test_remember_query_writes_local_memory_without_llm(monkeypatch) -> None:
+    def fake_post(path: str, payload, default):
+        assert path == "/reflexio/api/memories"
+        assert payload["content"] == "我喜欢 Rust sidecar"
+        assert payload["category"] == "preference"
+        return {"success": True, "id": 7}
+
+    monkeypatch.setattr(memory_reply, "post_json", fake_post)
+
+    out = build_direct_reply(_msg("记住 我喜欢 Rust sidecar"), model="test-model", start_time=0)
+
+    assert out is not None
+    assert "记住了" in out.content
+    assert "未调用 LLM" in out.content
+    assert "#7" in out.content
+
+
+def test_memory_status_uses_reflexio_without_llm(monkeypatch) -> None:
+    def fake_get(path: str, default):
+        if path == "/reflexio/api/stats":
+            return {"total_memories": 2, "latest_memory_at": "2026-05-03 10:00:00", "total_interactions": 37, "total_facts": 0}
+        if path == "/reflexio/api/memories?limit=5":
+            return [{"content": "网页尽量纯中文", "category": "preference"}]
+        return default
+
+    monkeypatch.setattr(memory_reply, "get_json", fake_get)
+
+    out = build_direct_reply(_msg("记忆状态"), model="test-model", start_time=0)
+
+    assert out is not None
+    assert "本地记忆：2 条" in out.content
+    assert "网页尽量纯中文" in out.content
+
+
+def test_memory_search_uses_reflexio_without_llm(monkeypatch) -> None:
+    def fake_post(path: str, payload, default):
+        assert path == "/reflexio/api/memory/search"
+        assert payload["query"] == "Rust"
+        return {"results": [{"id": 3, "content": "优先 Rust sidecar", "category": "preference", "created_at": "2026-05-03 10:00:00"}]}
+
+    monkeypatch.setattr(memory_reply, "post_json", fake_post)
+
+    out = build_direct_reply(_msg("查记忆 Rust"), model="test-model", start_time=0)
+
+    assert out is not None
+    assert "本地记忆搜索" in out.content
+    assert "优先 Rust sidecar" in out.content
 
 
 def test_non_status_message_falls_through() -> None:

@@ -1,5 +1,5 @@
 use crate::embedding::{bytes_to_vec, cosine_similarity, vec_to_bytes, SearchResult};
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::Serialize;
 use std::path::Path;
 
@@ -15,6 +15,16 @@ pub struct InteractionRecord {
 pub struct FactRecord {
     pub id: i64,
     pub content: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct MemoryRecord {
+    pub id: i64,
+    pub user_id: String,
+    pub category: String,
+    pub content: String,
+    pub source: String,
     pub created_at: String,
 }
 
@@ -49,7 +59,27 @@ impl DbStore {
             [],
         )?;
 
-        // Migrate: add embedding column if missing
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS memories (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'note',
+                content TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'manual',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_user_id ON memories(user_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at)",
+            [],
+        )?;
+
+        // Migrate: add embedding column if missing.
         let has_emb_int = conn
             .prepare("SELECT embedding FROM interactions LIMIT 0")
             .is_ok();
@@ -81,6 +111,20 @@ impl DbStore {
         self.conn.execute(
             "INSERT INTO facts (user_id, content) VALUES (?1, ?2)",
             params![user_id, content],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn save_memory(
+        &self,
+        user_id: &str,
+        category: &str,
+        content: &str,
+        source: &str,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO memories (user_id, category, content, source) VALUES (?1, ?2, ?3, ?4)",
+            params![user_id, category, content, source],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -117,11 +161,28 @@ impl DbStore {
             .unwrap_or(0))
     }
 
+    pub fn count_memories(&self) -> Result<i64> {
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))
+            .unwrap_or(0))
+    }
+
+    pub fn latest_memory_at(&self) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT strftime('%Y-%m-%d %H:%M:%S', created_at, '+8 hours') FROM memories ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+    }
+
     pub fn get_recent_interactions(&self, limit: usize) -> Result<Vec<InteractionRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, user_id, content, strftime(\"%Y-%m-%d %H:%M:%S\", created_at, \"+8 hours\") AS created_at FROM interactions ORDER BY id DESC LIMIT ?"
+            "SELECT id, user_id, content, strftime('%Y-%m-%d %H:%M:%S', created_at, '+8 hours') AS created_at FROM interactions ORDER BY id DESC LIMIT ?"
         )?;
-        let rows = stmt.query_map(params![limit], |row| {
+        let rows = stmt.query_map(params![limit as i64], |row| {
             Ok(InteractionRecord {
                 id: row.get(0)?,
                 user_id: row.get(1)?,
@@ -129,29 +190,45 @@ impl DbStore {
                 created_at: row.get(3)?,
             })
         })?;
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row?);
-        }
-        Ok(results)
+        rows.collect()
     }
 
     pub fn get_recent_facts(&self, limit: usize) -> Result<Vec<FactRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content, strftime(\"%Y-%m-%d %H:%M:%S\", created_at, \"+8 hours\") AS created_at FROM facts ORDER BY id DESC LIMIT ?"
+            "SELECT id, content, strftime('%Y-%m-%d %H:%M:%S', created_at, '+8 hours') AS created_at FROM facts ORDER BY id DESC LIMIT ?"
         )?;
-        let rows = stmt.query_map(params![limit], |row| {
+        let rows = stmt.query_map(params![limit as i64], |row| {
             Ok(FactRecord {
                 id: row.get(0)?,
                 content: row.get(1)?,
                 created_at: row.get(2)?,
             })
         })?;
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row?);
+        rows.collect()
+    }
+
+    pub fn get_recent_memories(&self, limit: usize) -> Result<Vec<MemoryRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, user_id, category, content, source, strftime('%Y-%m-%d %H:%M:%S', created_at, '+8 hours') AS created_at FROM memories ORDER BY id DESC LIMIT ?"
+        )?;
+        let rows = stmt.query_map(params![limit as i64], memory_from_row)?;
+        rows.collect()
+    }
+
+    pub fn search_memories(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
+        let query = query.trim();
+        if query.is_empty() {
+            return self.get_recent_memories(limit);
         }
-        Ok(results)
+        let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+        let mut stmt = self.conn.prepare(
+            "SELECT id, user_id, category, content, source, strftime('%Y-%m-%d %H:%M:%S', created_at, '+8 hours') AS created_at
+             FROM memories
+             WHERE content LIKE ?1 ESCAPE '\\' OR category LIKE ?1 ESCAPE '\\' OR source LIKE ?1 ESCAPE '\\'
+             ORDER BY id DESC LIMIT ?2"
+        )?;
+        let rows = stmt.query_map(params![pattern, limit as i64], memory_from_row)?;
+        rows.collect()
     }
 
     pub fn search_similar(
@@ -162,10 +239,9 @@ impl DbStore {
     ) -> Result<Vec<SearchResult>> {
         let mut results: Vec<SearchResult> = Vec::new();
 
-        // Search facts
         {
             let mut stmt = self.conn.prepare(
-                "SELECT id, content, embedding, strftime(\"%Y-%m-%d %H:%M:%S\", created_at, \"+8 hours\") AS created_at FROM facts WHERE embedding IS NOT NULL"
+                "SELECT id, content, embedding, strftime('%Y-%m-%d %H:%M:%S', created_at, '+8 hours') AS created_at FROM facts WHERE embedding IS NOT NULL"
             )?;
             let rows = stmt.query_map([], |row| {
                 let id: i64 = row.get(0)?;
@@ -190,10 +266,9 @@ impl DbStore {
             }
         }
 
-        // Search interactions
         {
             let mut stmt = self.conn.prepare(
-                "SELECT id, content, embedding, strftime(\"%Y-%m-%d %H:%M:%S\", created_at, \"+8 hours\") AS created_at FROM interactions WHERE embedding IS NOT NULL"
+                "SELECT id, content, embedding, strftime('%Y-%m-%d %H:%M:%S', created_at, '+8 hours') AS created_at FROM interactions WHERE embedding IS NOT NULL"
             )?;
             let rows = stmt.query_map([], |row| {
                 let id: i64 = row.get(0)?;
@@ -226,4 +301,15 @@ impl DbStore {
         results.truncate(limit);
         Ok(results)
     }
+}
+
+fn memory_from_row(row: &rusqlite::Row<'_>) -> Result<MemoryRecord> {
+    Ok(MemoryRecord {
+        id: row.get(0)?,
+        user_id: row.get(1)?,
+        category: row.get(2)?,
+        content: row.get(3)?,
+        source: row.get(4)?,
+        created_at: row.get(5)?,
+    })
 }

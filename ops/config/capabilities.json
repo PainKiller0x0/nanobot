@@ -203,13 +203,13 @@
   {
     "id": "reflexio-memory",
     "name": "Reflexio 记忆看板",
-    "description": "记忆与反思看板，用于观察长期记忆、自省报告和偏好演化。",
+    "description": "本地记忆看板：手动保存偏好/项目事实，支持本地 SQLite 快速检索。",
     "category": "记忆",
     "kind": "sidecar",
     "service_id": "reflexio",
     "entry_url": "/reflexio/",
     "enabled": true,
-    "trigger_phrases": ["记忆状态", "自省报告", "反思看板"],
+    "trigger_phrases": ["记忆状态", "记住 我喜欢...", "查记忆 Rust", "你记得什么"],
     "commands": [
       {
         "label": "Reflexio 日志",
@@ -218,8 +218,8 @@
     ],
     "data_paths": ["/root/.nanobot/data/reflexio"],
     "tags": ["memory", "reflection", "dashboard"],
-    "mcp_tools": ["memory.search", "memory.summary"],
-    "notes": "后续可向 Hermes 的 MEMORY.md / USER.md 学习，做有边界的轻量记忆。"
+    "mcp_tools": ["memory.local_save", "memory.local_search", "memory.summary"],
+    "notes": "先做本地优先的显式记忆：只有用户说“记住”才写入，默认不自动外传聊天内容。"
   },
   {
     "id": "weather-expert",

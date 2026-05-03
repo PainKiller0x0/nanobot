@@ -1,87 +1,70 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Reflexio-RS</title>
+<title>Reflexio 本地记忆</title>
 <style>
-:root{--bg:#fafaf7;--card:#fff;--border:rgba(0,0,0,.1);--text:#1a1a1a;--muted:#888;--accent:#0066cc;--radius:8px;--shadow:0 1px 3px rgba(0,0,0,.08);--th-bg:#f8f8f5;--hover-bg:#f8f8f5;--pre-bg:#f5f5f2;--btn-hover:#f0f0ed}
-[data-theme="dark"]{--bg:#0a0a0a;--card:#1a1a1a;--border:rgba(255,255,255,.12);--text:rgba(232,232,228,.92);--muted:rgba(232,232,228,.5);--accent:#6db3f2;--shadow:0 1px 3px rgba(0,0,0,.3);--th-bg:#222;--hover-bg:#222;--pre-bg:#1e1e1e;--btn-hover:#2a2a2a}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.6;transition:background .2s,color .2s}
-.header{background:var(--card);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10}
-.header h1{font-size:20px;font-weight:600}
-.header .tag{font-size:11px;background:var(--accent);color:#fff;padding:2px 8px;border-radius:10px}
-.header .version{font-size:12px;color:var(--muted)}
-.header-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
-.icon-btn{width:32px;height:32px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;transition:all .15s}
-.icon-btn:hover{background:var(--hover-bg)}
-.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--card);padding:0 24px}
-.tab{padding:10px 20px;cursor:pointer;border-bottom:2px solid transparent;font-size:14px;color:var(--muted);transition:all .15s}
-.tab:hover{color:var(--text)}
-.tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:500}
-.content{max-width:1200px;margin:0 auto;padding:24px}
-.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
-.stat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;text-align:center;box-shadow:var(--shadow)}
-.stat-card .value{font-size:32px;font-weight:700;color:var(--accent)}
-.stat-card .label{font-size:13px;color:var(--muted);margin-top:4px}
-table{width:100%;border-collapse:collapse;font-size:14px}
-th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border)}
-th{background:var(--th-bg);font-weight:600;color:var(--muted);font-size:12px;letter-spacing:.5px}
-tr:hover td{background:var(--hover-bg)}
-.empty{text-align:center;padding:40px;color:var(--muted)}
-.btn{display:inline-block;padding:6px 14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;background:var(--card);color:var(--text);transition:all .15s}
-.btn:hover{background:var(--btn-hover)}
-pre{background:var(--pre-bg);color:var(--text);padding:12px;border-radius:6px;font-size:13px;overflow-x:auto;max-height:400px;border:1px solid var(--border);white-space:pre-wrap;word-break:break-word}
-.hidden{display:none}
-td.content-cell{max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:root{--bg:#f4f0e7;--card:#fffdf7;--text:#202018;--muted:#6f695d;--line:#ddd3c1;--accent:#b7662d;--accent2:#2f7f72;--ok:#16854e;--bad:#c43d32;--shadow:0 20px 60px rgba(82,56,24,.13)}
+[data-theme="dark"]{--bg:#111816;--card:#1d2621;--text:#edf5ea;--muted:#a8b5a4;--line:#344139;--accent:#f0a35c;--accent2:#77c7b7;--ok:#76d39a;--bad:#ff8278;--shadow:0 22px 70px rgba(0,0,0,.34)}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(860px 520px at -10% -10%,rgba(183,102,45,.22),transparent 58%),radial-gradient(760px 460px at 108% 0,rgba(47,127,114,.17),transparent 56%),var(--bg);color:var(--text);font-family:"Avenir Next","PingFang SC","Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:0 auto;padding:24px 16px 40px}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}.panel{background:var(--card);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);padding:20px}.eyebrow{color:var(--accent2);font-size:12px;font-weight:900;letter-spacing:.16em}.title{font-family:Georgia,"Noto Serif SC",serif;font-size:42px;line-height:1.04;margin:8px 0 10px}.sub{color:var(--muted);line-height:1.75;margin:0}.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.btn,button{border:1px solid var(--line);border-radius:999px;padding:9px 13px;background:var(--text);color:var(--bg);font-weight:900;text-decoration:none;cursor:pointer}.secondary{background:transparent;color:var(--text)}.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.stat{border:1px solid var(--line);border-radius:18px;padding:14px;background:rgba(255,255,255,.16)}.k{font-size:12px;color:var(--muted)}.v{font-size:28px;font-weight:950;letter-spacing:-.04em}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.full{grid-column:1/-1}.row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.name{font-size:18px;font-weight:950}.muted{color:var(--muted)}.mini{font-size:12px;line-height:1.55}.list{display:grid;gap:10px}.item{border:1px solid var(--line);border-radius:16px;padding:12px;background:rgba(255,255,255,.16)}.tag{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:4px 8px;font-size:12px;color:var(--accent);font-weight:900}textarea,input,select{width:100%;border:1px solid var(--line);border-radius:14px;padding:11px 12px;background:rgba(255,255,255,.36);color:var(--text);font:inherit}textarea{min-height:108px;resize:vertical}.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}.table{width:100%;border-collapse:collapse}.table th,.table td{border-bottom:1px solid var(--line);padding:9px 8px;text-align:left;vertical-align:top}.table th{font-size:12px;color:var(--muted)}.content{white-space:pre-wrap;line-height:1.6}.ok{color:var(--ok)}.bad{color:var(--bad)}@media(max-width:860px){.hero,.grid,.formgrid{grid-template-columns:1fr}.full{grid-column:auto}.title{font-size:33px}.stats{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<div class="header">
-<h1>Reflexio-RS</h1>
-<span class="tag">Rust</span>
-<span class="version" id="version"></span>
-<div class="header-actions">
-<button class="icon-btn" id="lang-btn" title="Switch Language / 切换语言">EN</button>
-<button class="icon-btn" id="theme-btn" title="Toggle Dark Mode / 切换暗色模式">&#9790;</button>
-</div>
-</div>
-<div class="tabs">
-<div class="tab active" data-tab="dashboard">Dashboard / 仪表盘</div>
-<div class="tab" data-tab="interactions">Interactions / 交互记录</div>
-<div class="tab" data-tab="facts">Facts / 提取事实</div>
-</div>
-<div class="content">
-<div id="tab-dashboard"><div class="stats-grid" id="stats-grid"></div></div>
-<div id="tab-interactions" class="hidden">
-<div style="margin-bottom:12px"><button class="btn" onclick="loadInteractions()">Refresh / 刷新</button></div>
-<div id="interactions-list"></div>
-</div>
-<div id="tab-facts" class="hidden">
-<div style="margin-bottom:12px"><button class="btn" onclick="loadFacts()">Refresh / 刷新</button></div>
-<div id="facts-list"></div>
-</div>
+<div class="wrap">
+  <section class="hero">
+    <div class="panel">
+      <div class="eyebrow">LOCAL MEMORY</div>
+      <h1 class="title">Reflexio 本地记忆</h1>
+      <p class="sub">现在它先做一件确定有用的事：把你明确要求“记住”的内容落到本地 SQLite，并提供快速检索。默认不会把这部分记忆发送给外部 LLM 或 Embedding 服务。</p>
+      <div class="toolbar"><a class="btn" href="/">回到驾驶舱</a><a class="btn secondary" href="/sidecars">能力总控</a><button class="secondary" onclick="toggleTheme()">明暗</button><button class="secondary" onclick="loadAll()">刷新</button></div>
+    </div>
+    <div class="panel"><div class="stats" id="stats"><div class="muted">加载中...</div></div></div>
+  </section>
+
+  <section class="grid">
+    <article class="panel">
+      <div class="row"><div><div class="name">写入一条记忆</div><div class="muted mini">等价 QQ：记住 我喜欢……</div></div><span class="tag">local</span></div>
+      <textarea id="memoryContent" placeholder="例如：我偏好 Rust sidecar；网页尽量纯中文；不要轻易改 nanobot 本体。"></textarea>
+      <div class="formgrid"><select id="memoryCategory"><option value="preference">偏好</option><option value="project">项目</option><option value="habit">习惯</option><option value="note">备注</option></select><input id="memorySource" value="dashboard" /></div>
+      <button onclick="saveMemory()">记住</button><span id="saveStatus" class="mini muted" style="margin-left:10px"></span>
+    </article>
+
+    <article class="panel">
+      <div class="row"><div><div class="name">搜索记忆</div><div class="muted mini">等价 QQ：查记忆 Rust sidecar</div></div><span class="tag">keyword</span></div>
+      <input id="searchInput" placeholder="输入关键词，例如：Rust / 网页 / nanobot 本体" onkeydown="if(event.key==='Enter')searchMemory()" />
+      <div style="margin-top:10px"><button onclick="searchMemory()">搜索</button></div>
+      <div class="list" id="searchResults" style="margin-top:12px"></div>
+    </article>
+
+    <article class="panel full">
+      <div class="row"><div><div class="name">最近本地记忆</div><div class="muted mini">只显示你明确保存的记忆，不包含完整聊天流水。</div></div><span class="tag" id="memoryCount">0</span></div>
+      <div class="list" id="memories" style="margin-top:12px"></div>
+    </article>
+
+    <article class="panel">
+      <div class="name">历史交互</div><div class="muted mini">旧 Reflexio 自动写入遗留数据；目前不再作为主记忆闭环。</div>
+      <div id="interactions" style="margin-top:12px"></div>
+    </article>
+    <article class="panel">
+      <div class="name">抽取事实</div><div class="muted mini">旧 LLM 抽取事实；当前先不自动外发内容。</div>
+      <div id="facts" style="margin-top:12px"></div>
+    </article>
+  </section>
 </div>
 <script>
-const LANG={en:{stats:['Interactions','Extracted Facts'],empty_int:'No interactions',empty_facts:'No facts extracted yet',loading:'Loading...',error:'Error',th_id:'ID',th_user:'User',th_content:'Content',th_created:'Created (UTC+8)',refresh:'Refresh'},zh:{stats:['交互记录','提取事实'],empty_int:'暂无交互记录',empty_facts:'暂无提取事实',loading:'加载中...',error:'出错',th_id:'ID',th_user:'用户',th_content:'内容',th_created:'创建时间(UTC+8)',refresh:'刷新'}};
-let lang=localStorage.getItem('reflexio-rs-lang')||'en';
-let theme=localStorage.getItem('reflexio-rs-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
-function t(k){return LANG[lang][k]||k}
-function applyTheme(){document.documentElement.setAttribute('data-theme',theme);document.getElementById('theme-btn').innerHTML=theme==='dark'?'&#9788;':'&#9790;';localStorage.setItem('reflexio-rs-theme',theme)}
-function applyLang(){document.getElementById('lang-btn').textContent=lang==='en'?'EN':'中';const a=document.querySelector('.tab.active');if(a)loadTab(a.dataset.tab)}
-function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
-async function api(p){const r=await fetch(p);return r.json()}
-function byId(id){return document.getElementById(id)}
-async function init(){try{const v=await api('/health');byId('version').textContent='v'+v.version}catch(e){}applyTheme();applyLang();loadDashboard()}
-async function loadDashboard(){try{const s=await api('/api/stats');const l=t('stats');byId('stats-grid').innerHTML=[{v:s.total_interactions,l:l[0]},{v:s.total_facts,l:l[1]}].map(x=>'<div class="stat-card"><div class="value">'+x.v+'</div><div class="label">'+x.l+'</div></div>').join('')}catch(e){console.error(e)}}
-async function loadInteractions(){const el=byId('interactions-list');el.innerHTML='<div class="empty">'+t('loading')+'</div>';try{const d=await api('/api/interactions');if(!d.length){el.innerHTML='<div class="empty">'+t('empty_int')+'</div>';return}el.innerHTML='<table><thead><tr><th>'+t('th_id')+'</th><th>'+t('th_user')+'</th><th>'+t('th_content')+'</th><th>'+t('th_created')+'</th></tr></thead><tbody>'+d.map(i=>'<tr><td>'+i.id+'</td><td>'+esc(i.user_id)+'</td><td class="content-cell" title="'+esc(i.content)+'">'+esc(i.content.substring(0,120))+'</td><td>'+esc(i.created_at)+'</td></tr>').join('')+'</tbody></table>'}catch(e){el.innerHTML='<div class="empty">'+t('error')+': '+e.message+'</div>'}}
-async function loadFacts(){const el=byId('facts-list');el.innerHTML='<div class="empty">'+t('loading')+'</div>';try{const d=await api('/api/facts');if(!d.length){el.innerHTML='<div class="empty">'+t('empty_facts')+'</div>';return}el.innerHTML='<table><thead><tr><th>'+t('th_id')+'</th><th>'+t('th_content')+'</th><th>'+t('th_created')+'</th></tr></thead><tbody>'+d.map(f=>'<tr><td>'+f.id+'</td><td><pre style="margin:0;max-height:120px">'+esc(f.content)+'</pre></td><td>'+esc(f.created_at)+'</td></tr>').join('')+'</tbody></table>'}catch(e){el.innerHTML='<div class="empty">'+t('error')+': '+e.message+'</div>'}}
-function loadTab(tab){byId('tab-'+tab).classList.remove('hidden');if(tab==='dashboard')loadDashboard();if(tab==='interactions')loadInteractions();if(tab==='facts')loadFacts()}
-document.querySelectorAll('.tab').forEach(tb=>{tb.addEventListener('click',function(){document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('[id^=tab-]').forEach(x=>x.classList.add('hidden'));this.classList.add('active');loadTab(this.dataset.tab)})});
-byId('theme-btn').addEventListener('click',function(){theme=theme==='dark'?'light':'dark';applyTheme()});
-byId('lang-btn').addEventListener('click',function(){lang=lang==='en'?'zh':'en';localStorage.setItem('reflexio-rs-lang',lang);applyLang()});
-init();
+const root=document.documentElement;if(localStorage.reflexioTheme==='dark')root.setAttribute('data-theme','dark');
+function toggleTheme(){const d=root.getAttribute('data-theme')==='dark';root.setAttribute('data-theme',d?'light':'dark');localStorage.reflexioTheme=d?'light':'dark'}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+async function getJson(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error(url+' '+r.status);return r.json()}
+async function postJson(url,payload){const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});if(!r.ok)throw new Error(url+' '+r.status);return r.json()}
+function stat(k,v,n){return '<div class="stat"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div><div class="mini muted">'+esc(n||'')+'</div></div>'}
+function item(x){return '<div class="item"><div class="row"><div><div class="name">'+esc(x.content)+'</div><div class="muted mini">'+esc(x.category||'-')+' · '+esc(x.source||'-')+' · '+esc(x.created_at||'-')+'</div></div><span class="tag">#'+esc(x.id)+'</span></div></div>'}
+async function loadAll(){try{const all=await Promise.all([getJson('/api/stats'),getJson('/api/memories?limit=20'),getJson('/api/interactions'),getJson('/api/facts')]);const stats=all[0],memories=all[1],interactions=all[2],facts=all[3];document.getElementById('stats').innerHTML=stat('本地记忆',stats.total_memories||0,stats.latest_memory_at?'最新 '+stats.latest_memory_at:'等待第一条记忆')+stat('历史交互',stats.total_interactions||0,'旧链路记录')+stat('抽取事实',stats.total_facts||0,'旧 LLM 事实')+stat('模式','本地优先','手动写入，不自动外传');document.getElementById('memoryCount').textContent=memories.length;document.getElementById('memories').innerHTML=memories.length?memories.map(item).join(''):'<div class="muted">还没有本地记忆。你可以说：记住 我喜欢……</div>';document.getElementById('interactions').innerHTML=renderTable(interactions.slice(0,8),['id','content','created_at']);document.getElementById('facts').innerHTML=renderTable(facts.slice(0,8),['id','content','created_at']);}catch(e){document.getElementById('memories').innerHTML='<div class="bad">加载失败：'+esc(e.message)+'</div>'}}
+function renderTable(rows,cols){if(!rows.length)return '<div class="muted">暂无</div>';return '<div style="overflow:auto"><table class="table"><thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+cols.map(c=>'<td class="content">'+esc(String(r[c]||'').slice(0,180))+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'}
+async function saveMemory(){const content=document.getElementById('memoryContent').value.trim();if(!content){document.getElementById('saveStatus').textContent='先写点内容';return}const payload={content,category:document.getElementById('memoryCategory').value,source:document.getElementById('memorySource').value||'dashboard',user_id:'dashboard'};try{const r=await postJson('/api/memories',payload);document.getElementById('saveStatus').textContent=r.success?'已记住 #'+r.id:'失败：'+r.msg;document.getElementById('memoryContent').value='';await loadAll();}catch(e){document.getElementById('saveStatus').textContent='失败：'+e.message}}
+async function searchMemory(){const query=document.getElementById('searchInput').value.trim();try{const r=await postJson('/api/memory/search',{query,limit:12});document.getElementById('searchResults').innerHTML=r.results.length?r.results.map(item).join(''):'<div class="muted">没搜到。</div>'}catch(e){document.getElementById('searchResults').innerHTML='<div class="bad">搜索失败：'+esc(e.message)+'</div>'}}
+loadAll();
 </script>
 </body>
 </html>

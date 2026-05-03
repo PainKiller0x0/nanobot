@@ -8,6 +8,8 @@ Type=simple
 WorkingDirectory=/root/nanobot-reflexio-rs
 Environment=REFLEXIO_HOST=127.0.0.1
 Environment=REFLEXIO_PORT=8081
+Environment=DATABASE_URL=/root/.nanobot/data/reflexio/reflexio.db
+ExecStartPre=/usr/bin/mkdir -p /root/.nanobot/data/reflexio
 ExecStart=/usr/local/bin/nanobot-reflexio-rs
 Restart=always
 RestartSec=3
