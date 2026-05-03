@@ -269,10 +269,7 @@ fn route_decision(
         return decision;
     }
 
-    let explicit_pro = contains_any(
-        &requested_model.to_lowercase(),
-        &["pro", "reasoner", "deep"],
-    );
+    let explicit_pro = contains_any(&requested_model.to_lowercase(), &["pro", "reasoner"]);
     let prompt_chars = request_json.map(estimate_prompt_chars).unwrap_or(0);
     let message_count = request_json
         .and_then(|v| v.get("messages"))
