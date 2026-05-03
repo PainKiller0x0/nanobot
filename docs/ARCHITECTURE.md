@@ -238,6 +238,13 @@ LOF 定时报告不是直接读缓存发送。Notify 任务调用 `qdii-monitor/
 - LLM 设置和广告过滤。
 - 用 Podman 隔离 RSS 运行环境。
 
+实现边界：
+
+- `db.rs` 保存数据库 schema、读写和查询 helper。
+- `main.rs` 仍然承载 HTTP route、crawler、UI 和 settings，是后续继续拆分的主要对象。
+- `LlmSettings` 是 RSS LLM 配置的单一入口，负责 payload merge、密钥遮蔽、持久化 JSON、公开 JSON、chat completions URL 和 `free_only` 状态说明。
+- 自动刷新链路只读 `LlmSettings::enabled()`，不要在 handler 或 crawler 里重新手写“是否允许付费模型”的判断。
+
 ### `notify-sidecar-rs`
 
 - cron-like 调度。
@@ -266,6 +273,15 @@ HERMES 任务调用 `hermes-check/hermes_check.py`。脚本应读取 `8093/api/s
 - Reflexio 风格记忆/反思看板。
 - 有独立 Web 和数据生命周期，所以不放 core。
 
+实现边界：
+
+- `storage.rs` 管 SQLite 生命周期和查询。
+- `provider.rs` 管 OpenAI-compatible LLM 请求。
+- `reasoning.rs` 管事实提取/反思提示词和解析。
+- `embedding.rs` 管 embedding 请求和本地相似度计算。
+- `cost_policy.rs` 是免费模型策略入口，统一保存默认免费模型、环境开关解析、LLM/embedding 白名单和 `*_enabled` 判断。
+- 后续如果允许新的免费模型，优先改 `cost_policy.rs`，不要在 `main.rs` 或 `embedding.rs` 复制 base URL/model 判断。
+
 ### `obp-rs`
 
 - 模型网关、成本统计、fallback 控制台。
@@ -286,6 +302,25 @@ HERMES 任务调用 `hermes-check/hermes_check.py`。脚本应读取 `8093/api/s
 - `x-obp-purpose` / `x-obp-intent` 或请求体 `metadata.purpose` / `metadata.intent` 可作为零额外延迟 hint；不额外调用分类模型。
 - 月预算降级只抑制自动升 Pro，不影响普通默认模型请求。
 - 月预算硬熔断优先走 backup；backup 失败后才走 emergency。日常主模型超时或上游报错时，fallback 顺序仍优先 emergency，保证体验。
+
+## 公共实现边界
+
+当前已经形成三类公共实现，后续 review 优先检查有没有重复造轮子：
+
+| 层级 | 公共入口 | 负责内容 | 不负责内容 |
+|---|---|---|---|
+| Python skill/script | `ops/sources/_shared/ops_common.py` | HTTP fallback、JSON 请求、东八区时间、节假日/补班日、短文本截断 | 业务文案、具体报告格式、secret |
+| RSS LLM settings | `wechat-rss-rs::LlmSettings` | LLM 设置 merge、密钥遮蔽、保存/公开 JSON、免费策略状态、测试 URL | crawler 业务判断、文章格式化 |
+| Reflexio cost policy | `nanobot-reflexio-rs/src/cost_policy.rs` | 免费 LLM/embedding 默认值、环境开关、白名单、启用判断 | 具体 prompt、事实抽取、SQLite 检索 |
+| OBP route metadata | `obp-rs::{config,proxy,stats}` | 模型组、渠道配置、fallback、成本统计、响应头路由信息 | Nanobot agent 语义判断、sidecar 主动消费模型 |
+
+抽取原则：
+
+- 只抽“稳定重复的机制”，不要为了抽象把业务文案、HTML 结构、prompt 全塞进 shared。
+- 涉及费用的钱包策略必须有单一入口：RSS 看 `LlmSettings`，Reflexio 看 `cost_policy.rs`，Nanobot 主模型看 OBP。
+- 共享 helper 不能包含真实账号、chat_id、API key、机器私有路径以外的可迁移默认值。
+- 新增 sidecar 自动 LLM 调用时，默认必须先证明它使用免费模型；否则应走 OBP 并计入成本统计。
+- Review 时如果看到 `reqwest`/`urllib`/`requests` wrapper、东八区时间、节假日、密钥遮蔽、免费模型判断被重新写一遍，优先收口。
 
 ## MCP 和 AI 分析路径
 
@@ -315,24 +350,27 @@ QQ 回复 / dashboard 摘要
 - Podman 迁移后，常驻内存比 Docker 低。
 - 服务矩阵和 `sidecarctl` 让 health/log/restart 有统一入口。
 - Trend Radar 提供新闻采集和 MCP 风格工具，但没有把重 Python 服务塞进 core。
-- `_shared/ops_common.py` 已经减少 skill 客户端重复代码。
-- 最近一次实现 review 已将 HERMES 和 LOF notify wrapper 的 HTTP/JSON/timeout 逻辑收口到 `JsonHttpClient`，去掉了 LOF wrapper 对 `requests` 的依赖。
+- `_shared/ops_common.py` 已经减少 skill 客户端重复代码，HERMES、LOF wrapper、Trend、RSS skill 和个人 ops summary 都复用同一套 HTTP/时间 helper。
+- RSS 的 LLM settings 重复逻辑已经收口到 `LlmSettings`，避免 handler、settings API、test endpoint 各自处理密钥遮蔽和 `free_only`。
+- Reflexio 的免费模型策略已经收口到 `cost_policy.rs`，`main.rs` 和 `embedding.rs` 不再各自复制 env bool 与免费白名单判断。
 
 主要技术债：
 
 - `lof-sidecar-rs` 仍然偏大，一个文件里同时有 dashboard、LOF 逻辑、反代和服务管理。
-- `wechat-rss-rs` 偏大，UI、settings、crawler、DB、LLM test endpoint 混在一起。
+- `wechat-rss-rs` 仍然偏大，虽然 DB 和 LLM settings 已有边界，但 UI、crawler、route handler、文章格式化仍主要挤在 `main.rs`。
 - `ops/` 快照和 `/root/nanobot-ops` 线上工作副本可能漂移，需要把 sync/commit 变成习惯。
 - `/obp/` 和未来 MCP 入口的认证边界要继续显式维护，不能为了方便把 admin 面裸露出去。
 - 部分 systemd unit 指向 `/root/.nanobot` 线上路径，这是设计选择，但恢复环境时必须先恢复 workspace 和 secrets。
+- `weather-expert/weather_check.py` 仍有一套天气专用的节假日/时段逻辑；除非继续扩成多脚本复用，否则先不要硬抽，避免破坏天气文案。
 
 建议下一步重构：
 
 1. Rust sidecar 的大块 HTML/CSS 如果继续增长，拆到 `static` 或 `include_str!` 文件。
 2. `lof-sidecar-rs` 如果继续加功能，把 reverse proxy、service manager、LOF domain 分 module。
-3. `wechat-rss-rs` 拆 DB、settings、crawler、LLM client 模块。
-4. 增加 `ops/scripts/check-architecture.sh`，检查 sidecars registry、systemd unit、文档端口是否一致。
-5. 新个人自动化默认采用 `skill + sidecar API`，除非确实必须改 Nanobot core。
+3. `wechat-rss-rs` 下一步优先拆 crawler、article formatter、settings routes；`LlmSettings` 继续保留为 settings/cost policy 入口。
+4. `weather-expert/weather_check.py` 如果出现第二个天气/通勤脚本，再把节假日和未来时段选择抽进 `_shared`。
+5. 增加 `ops/scripts/check-architecture.sh`，检查 sidecars registry、systemd unit、文档端口是否一致。
+6. 新个人自动化默认采用 `skill + sidecar API`，除非确实必须改 Nanobot core。
 
 ## 上游同步 checklist
 
@@ -375,9 +413,9 @@ python3 ops/scripts/smoke-model-switch.py --refresh-lof
 
 当前允许自动调用的免费模型：
 
-- RSS 广告判定：仅允许 `LongCat-Flash-Lite`，且 base 必须是 LongCat；其他模型即使填了 key 也不会被自动刷新链路调用。
-- Reflexio 事实提取：默认 `LongCat-Flash-Lite`，`REFLEXIO_ALLOW_PAID_LLM=false` 时付费模型不会自动启用。
-- Reflexio embedding：仅在配置了硅基流动免费 embedding key 且 endpoint/model 命中免费白名单时启用；否则回退到本地 SQLite 文本检索。
+- RSS 广告判定：仅允许 `LongCat-Flash-Lite`，且 base 必须是 LongCat；其他模型即使填了 key 也不会被自动刷新链路调用。实现入口是 `LlmSettings::free_allowed()` / `LlmSettings::enabled()`。
+- Reflexio 事实提取：默认 `LongCat-Flash-Lite`，`REFLEXIO_ALLOW_PAID_LLM=false` 时付费模型不会自动启用。实现入口是 `cost_policy::llm_enabled()`。
+- Reflexio embedding：仅在配置了硅基流动免费 embedding key 且 endpoint/model 命中免费白名单时启用；否则回退到本地 SQLite 文本检索。实现入口是 `cost_policy::embedding_enabled()`。
 - Trend、LOF、Notify、QQ sidecar：保持纯规则/抓取/投递，不直接调用 LLM。
 - OBP 是模型网关，不主动消费模型；只有外部请求进来才转发并计费。
 
