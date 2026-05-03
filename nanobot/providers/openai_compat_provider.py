@@ -269,6 +269,13 @@ def _log_obp_route_headers(source: Any) -> None:
     )
 
 
+def _is_obp_endpoint(api_base: str | None) -> bool:
+    if not api_base:
+        return False
+    normalized = api_base.strip().lower()
+    return "/obp/" in normalized or normalized.endswith("/obp") or normalized.endswith("/obp/v1")
+
+
 def _responses_circuit_key(
     model: str | None,
     default_model: str,
@@ -1204,6 +1211,9 @@ class OpenAICompatProvider(LLMProvider):
     async def _create_chat_completion_with_route_log(self, kwargs: dict[str, Any]) -> Any:
         """Create a chat completion and log OBP routing headers when present."""
         completions = self._client.chat.completions
+        if not _is_obp_endpoint(self._effective_base):
+            return await completions.create(**kwargs)
+
         raw_endpoint = getattr(completions, "with_raw_response", None)
         if raw_endpoint is None:
             result = await completions.create(**kwargs)

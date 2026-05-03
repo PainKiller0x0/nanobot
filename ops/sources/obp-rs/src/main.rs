@@ -5,7 +5,7 @@ mod stats;
 use crate::config::{
     load_config, load_router_config, save_config, save_router_config, Channel, RouterConfig,
 };
-use crate::proxy::{handle_proxy, ProxyState};
+use crate::proxy::{handle_anthropic_proxy, handle_openai_proxy, ProxyState};
 use crate::stats::{load_stats, pricing_snapshot, save_stats, UsageStats};
 use axum::{
     extract::{Path, State},
@@ -51,7 +51,9 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(dashboard))
-        .route("/v1/chat/completions", post(handle_proxy))
+        .route("/v1/chat/completions", post(handle_openai_proxy))
+        .route("/v1/messages", post(handle_anthropic_proxy))
+        .route("/anthropic/v1/messages", post(handle_anthropic_proxy))
         .route("/admin/channels", get(get_channels).post(add_channel))
         .route("/admin/channels/test", post(test_channel))
         .route("/admin/stats", get(get_stats).delete(clear_stats))
@@ -259,17 +261,19 @@ async fn test_anthropic_channel(
     let model =
         first_configured_model(&ch.models).unwrap_or_else(|| "claude-3-5-haiku-latest".to_string());
     let url = anthropic_messages_url(&ch.base);
-    let res = client
-        .post(&url)
-        .header("x-api-key", &ch.key)
-        .header("anthropic-version", "2023-06-01")
-        .json(&serde_json::json!({
-            "model": model,
-            "messages": [{"role":"user","content":"ping"}],
-            "max_tokens": 16
-        }))
-        .send()
-        .await;
+    let mut req = client.post(&url).json(&serde_json::json!({
+        "model": model,
+        "messages": [{"role":"user","content":"ping"}],
+        "max_tokens": 16
+    }));
+    if ch.base.to_lowercase().contains("anthropic.com") {
+        req = req
+            .header("x-api-key", &ch.key)
+            .header("anthropic-version", "2023-06-01");
+    } else {
+        req = req.header("Authorization", format!("Bearer {}", ch.key));
+    }
+    let res = req.send().await;
     response_to_test_result(res, started, model, url).await
 }
 

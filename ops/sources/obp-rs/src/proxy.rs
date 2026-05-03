@@ -6,7 +6,7 @@ use axum::{
     http::{header, HeaderName, Request, Response, StatusCode},
     response::IntoResponse,
 };
-use reqwest::{Body as ReqBody, Client};
+use reqwest::{Body as ReqBody, Client, RequestBuilder};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -43,10 +43,31 @@ struct Attempt {
     reason: String,
 }
 
-pub async fn handle_proxy(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProxyProtocol {
+    OpenAI,
+    Anthropic,
+}
+
+pub async fn handle_openai_proxy(
     State(state): State<Arc<ProxyState>>,
     req: Request<Body>,
-) -> impl IntoResponse {
+) -> Response<Body> {
+    handle_proxy(State(state), req, ProxyProtocol::OpenAI).await
+}
+
+pub async fn handle_anthropic_proxy(
+    State(state): State<Arc<ProxyState>>,
+    req: Request<Body>,
+) -> Response<Body> {
+    handle_proxy(State(state), req, ProxyProtocol::Anthropic).await
+}
+
+async fn handle_proxy(
+    State(state): State<Arc<ProxyState>>,
+    req: Request<Body>,
+    protocol: ProxyProtocol,
+) -> Response<Body> {
     let started = Instant::now();
     let (parts, body) = req.into_parts();
     let body_bytes = match to_bytes(body, MAX_REQUEST_BYTES).await {
@@ -90,7 +111,7 @@ pub async fn handle_proxy(
     }
     let stats = state.stats.lock().await.clone();
     let decision = route_decision(&router, &stats, request_json.as_ref(), &requested_model);
-    let attempts = build_attempts(&state, &channels, &router, &decision).await;
+    let attempts = build_attempts(&state, &channels, &router, &decision, protocol).await;
     if attempts.is_empty() {
         record_failure(
             &state,
@@ -109,19 +130,23 @@ pub async fn handle_proxy(
     let retry_statuses = router.retry_statuses.clone();
     let mut last_error: Option<Response<Body>> = None;
     for (attempt_idx, attempt) in attempts.iter().enumerate() {
-        let target_url = chat_url(&attempt.channel.base);
+        let target_url = target_url(&attempt.channel.base, protocol);
         let attempt_body = rewrite_model(&body_bytes, &attempt.actual_model);
         let mut target_req = state
             .client
             .post(&target_url)
-            .header("Authorization", format!("Bearer {}", attempt.channel.key))
             .body(ReqBody::from(attempt_body));
 
         for (name, value) in parts.headers.iter() {
-            if name != "host" && name != "authorization" && name != "content-length" {
+            if name != "host"
+                && name != "authorization"
+                && name != "content-length"
+                && !name.as_str().eq_ignore_ascii_case("x-api-key")
+            {
                 target_req = target_req.header(name, value);
             }
         }
+        target_req = apply_channel_auth(target_req, &attempt.channel, protocol);
 
         let response = match target_req.send().await {
             Ok(res) => res,
@@ -329,6 +354,10 @@ fn route_decision(
         return decision;
     }
 
+    if let Some(decision) = explicit_model_route(router, requested_model) {
+        return decision;
+    }
+
     let explicit_pro = contains_any(&requested_model.to_lowercase(), &["pro", "reasoner"]);
     let prompt_chars = request_json.map(estimate_prompt_chars).unwrap_or(0);
     let message_count = request_json
@@ -416,6 +445,55 @@ fn route_decision(
     decision
 }
 
+fn explicit_model_route(router: &RouterConfig, requested_model: &str) -> Option<RouteDecision> {
+    let requested = requested_model.trim();
+    if requested.is_empty() || requested.eq_ignore_ascii_case("unknown") {
+        return None;
+    }
+    if model_eq(requested, &router.default_model) {
+        // The default model remains smart-routable: long/complex prompts may still upgrade to Pro.
+        return None;
+    }
+    if model_eq(requested, &router.pro_model) {
+        return Some(RouteDecision {
+            requested_model: requested.to_string(),
+            desired_model: router.pro_model.clone(),
+            role: "pro".to_string(),
+            group: group_for_role(router, "pro"),
+            reason: "requested configured pro model".to_string(),
+        });
+    }
+    if model_eq(requested, &router.emergency_model) {
+        return Some(RouteDecision {
+            requested_model: requested.to_string(),
+            desired_model: router.emergency_model.clone(),
+            role: "emergency".to_string(),
+            group: group_for_role(router, "emergency"),
+            reason: "requested configured emergency model".to_string(),
+        });
+    }
+    if model_eq(requested, &router.backup_model) {
+        return Some(RouteDecision {
+            requested_model: requested.to_string(),
+            desired_model: router.backup_model.clone(),
+            role: "backup".to_string(),
+            group: group_for_role(router, "backup"),
+            reason: "requested configured backup model".to_string(),
+        });
+    }
+    Some(RouteDecision {
+        requested_model: requested.to_string(),
+        desired_model: requested.to_string(),
+        role: "any".to_string(),
+        group: String::new(),
+        reason: "requested explicit model passthrough".to_string(),
+    })
+}
+
+fn model_eq(a: &str, b: &str) -> bool {
+    !b.trim().is_empty() && a.trim().eq_ignore_ascii_case(b.trim())
+}
+
 fn group_for_role(router: &RouterConfig, role: &str) -> String {
     match role {
         "default" => router.default_group.trim(),
@@ -440,6 +518,7 @@ async fn build_attempts(
     channels: &[Channel],
     router: &RouterConfig,
     decision: &RouteDecision,
+    protocol: ProxyProtocol,
 ) -> Vec<Attempt> {
     let mut specs = Vec::new();
     add_role_attempts(
@@ -474,6 +553,7 @@ async fn build_attempts(
         let mut candidates: Vec<Channel> = channels
             .iter()
             .filter(|ch| ch.is_active())
+            .filter(|ch| channel_supports_protocol(ch, protocol))
             .filter(|ch| spec.role == "any" || ch.role_key() == spec.role)
             .filter(|ch| spec.group.is_empty() || ch.group_key() == spec.group)
             .filter(|ch| {
@@ -511,6 +591,14 @@ async fn build_attempts(
         }
     }
     attempts
+}
+
+fn channel_supports_protocol(ch: &Channel, protocol: ProxyProtocol) -> bool {
+    let ty = ch.r#type.trim().to_lowercase();
+    match protocol {
+        ProxyProtocol::OpenAI => ty.is_empty() || ty == "openai" || ty == "openai-compatible",
+        ProxyProtocol::Anthropic => ty == "anthropic" || ty == "anthropic-api",
+    }
 }
 
 fn fallback_roles(role: &str) -> &'static [&'static str] {
@@ -596,7 +684,14 @@ fn rewrite_model(body: &[u8], model: &str) -> Vec<u8> {
     body.to_vec()
 }
 
-fn chat_url(base: &str) -> String {
+fn target_url(base: &str, protocol: ProxyProtocol) -> String {
+    match protocol {
+        ProxyProtocol::OpenAI => openai_chat_url(base),
+        ProxyProtocol::Anthropic => anthropic_messages_url(base),
+    }
+}
+
+fn openai_chat_url(base: &str) -> String {
     let base = base.trim_end_matches('/');
     if base.ends_with("/chat/completions") {
         base.to_string()
@@ -604,6 +699,35 @@ fn chat_url(base: &str) -> String {
         format!("{}/chat/completions", base)
     } else {
         format!("{}/v1/chat/completions", base)
+    }
+}
+
+fn anthropic_messages_url(base: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if base.ends_with("/messages") {
+        base.to_string()
+    } else if base.ends_with("/v1") {
+        format!("{}/messages", base)
+    } else {
+        format!("{}/v1/messages", base)
+    }
+}
+
+fn apply_channel_auth(
+    req: RequestBuilder,
+    channel: &Channel,
+    protocol: ProxyProtocol,
+) -> RequestBuilder {
+    match protocol {
+        ProxyProtocol::OpenAI => req.header("Authorization", format!("Bearer {}", channel.key)),
+        ProxyProtocol::Anthropic => {
+            if channel.base.to_lowercase().contains("anthropic.com") {
+                req.header("x-api-key", &channel.key)
+                    .header("anthropic-version", "2023-06-01")
+            } else {
+                req.header("Authorization", format!("Bearer {}", channel.key))
+            }
+        }
     }
 }
 

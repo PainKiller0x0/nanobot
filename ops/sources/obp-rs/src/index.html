@@ -86,7 +86,7 @@
           <div class="flex flex-wrap justify-between gap-3 mb-3">
             <div>
               <h2 class="font-black text-lg">外部调用</h2>
-              <p class="text-xs text-slate-500 mt-1">外部系统统一走这个 OpenAI-compatible 入口；认证继续使用 8093 代理层的 Basic 或 Bearer，面板里不直接展示密钥。</p>
+              <p class="text-xs text-slate-500 mt-1">外部系统可以走 OpenAI Chat Completions 或 Anthropic Messages 两种格式；认证继续使用 8093 代理层的 Basic 或 Bearer，面板里不直接展示密钥。</p>
             </div>
             <button @click="saveRouter()" class="px-3 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-sm font-bold">保存外部设置</button>
           </div>
@@ -96,14 +96,17 @@
               <div class="flex flex-wrap items-center gap-2">
                 <code class="mono wrap" x-text="apiUrl"></code>
                 <button @click="copy(apiUrl)" class="btn">复制入口</button>
-                <button @click="copy(chatUrl)" class="btn">复制 Chat 接口</button>
+                <button @click="copy(chatUrl)" class="btn">复制 OpenAI 接口</button>
+                <button @click="copy(anthropicUrl)" class="btn">复制 Anthropic 接口</button>
               </div>
             </div>
             <label class="flex items-center gap-2"><input type="checkbox" x-model="router.external_enabled">允许外部调用</label>
             <label class="field md:col-span-2"><span class="field-label">外部允许模型 <button class="q" @click.prevent="help('只有这里列出的模型名可以被外部请求；每行或逗号分隔。支持 * 通配，但不建议公网开放 *。')">?</button></span><textarea x-model="externalModelText" rows="5" class="input mono" placeholder="deepseek-v4-flash&#10;deepseek-v4-pro"></textarea></label>
             <div class="subcard md:col-span-2">
-              <div class="flex flex-wrap justify-between gap-2 mb-2"><span class="k">调用示例</span><button @click="copy(externalCurl)" class="btn">复制 curl</button></div>
-              <pre class="mono text-xs whitespace-pre-wrap wrap" x-text="externalCurl"></pre>
+              <div class="flex flex-wrap justify-between gap-2 mb-2"><span class="k">OpenAI 调用示例</span><button @click="copy(openaiCurl)" class="btn">复制 curl</button></div>
+              <pre class="mono text-xs whitespace-pre-wrap wrap" x-text="openaiCurl"></pre>
+              <div class="flex flex-wrap justify-between gap-2 mt-4 mb-2"><span class="k">Anthropic 调用示例</span><button @click="copy(anthropicCurl)" class="btn">复制 curl</button></div>
+              <pre class="mono text-xs whitespace-pre-wrap wrap" x-text="anthropicCurl"></pre>
             </div>
           </div>
         </section>
@@ -195,8 +198,10 @@
     function app(){return{dark:localStorage.obp_theme==='dark',notice:'',loadError:'',copied:false,lastRefresh:'-',channels:[],stats:{total:{}},router:{},pricing:{},logs:[],showForm:false,isEdit:false,form:{},keywordText:'',externalModelText:'',routerSaving:false,testing:false,testResult:null,base:detectBase(),defaultKeywords:['深度','架构','review','重构','复杂','取舍','方案','设计','迁移','推理','长文','全盘'],defaultExternalModels:['deepseek-v4-flash','deepseek-v4-pro','MiniMax-M2.7','LongCat-Flash-Chat'],
       get apiUrl(){return location.origin + joinPath(this.base,'/v1')},
       get chatUrl(){return location.origin + joinPath(this.base,'/v1/chat/completions')},
+      get anthropicUrl(){return location.origin + joinPath(this.base,'/anthropic/v1/messages')},
       get firstAllowedModel(){return this.splitList(this.externalModelText)[0]||this.router.default_model||'deepseek-v4-flash'},
-      get externalCurl(){return `curl ${this.chatUrl} \\\n  -H "Authorization: Bearer <OBP_PROXY_TOKEN>" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"${this.firstAllowedModel}","messages":[{"role":"user","content":"你好"}],"stream":false}'`},
+      get openaiCurl(){return `curl ${this.chatUrl} \\\n  -H "Authorization: Bearer <OBP_PROXY_TOKEN>" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"${this.firstAllowedModel}","messages":[{"role":"user","content":"你好"}],"stream":false}'`},
+      get anthropicCurl(){return `curl ${this.anthropicUrl} \\\n  -H "Authorization: Bearer <OBP_PROXY_TOKEN>" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"MiniMax-M2.7","max_tokens":1000,"messages":[{"role":"user","content":"你好"}]}'`},
       get today(){const k=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Shanghai'});return this.stats.by_day?.[k]||{}},
       get month(){const k=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Shanghai'}).slice(0,7);return this.stats.by_month?.[k]||{}},
       get successRate(){const t=this.stats.total?.requests||0;return t?Math.round((this.stats.total.success||0)*1000/t)/10+'%':'-'},
