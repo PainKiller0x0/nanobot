@@ -5,13 +5,15 @@ use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const RECENT_LIMIT: usize = 100;
+const RECENT_LIMIT: usize = 200;
 const SHANGHAI_OFFSET_SECS: i64 = 8 * 60 * 60;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
 pub struct TokenUsage {
     #[serde(default)]
     pub prompt_tokens: u64,
+    #[serde(default)]
+    pub cached_tokens: u64,
     #[serde(default)]
     pub completion_tokens: u64,
     #[serde(default)]
@@ -24,11 +26,46 @@ impl TokenUsage {
             return Self::default();
         };
         let usage = value.get("usage");
+        let prompt = first_u64(
+            usage,
+            &[
+                &["prompt_tokens"],
+                &["input_tokens"],
+                &["prompt_cache_hit_tokens"],
+            ],
+        );
+        let miss = first_u64(usage, &[&["prompt_cache_miss_tokens"]]);
+        let cached = first_u64(
+            usage,
+            &[
+                &["prompt_tokens_details", "cached_tokens"],
+                &["input_tokens_details", "cached_tokens"],
+                &["cached_tokens"],
+                &["cache_read_input_tokens"],
+                &["prompt_cache_hit_tokens"],
+            ],
+        );
+        let completion = first_u64(usage, &[&["completion_tokens"], &["output_tokens"]]);
+        let prompt_tokens = if prompt == 0 && (cached > 0 || miss > 0) {
+            cached.saturating_add(miss)
+        } else {
+            prompt
+        };
+        let total = first_u64(usage, &[&["total_tokens"]]);
         Self {
-            prompt_tokens: json_u64(usage.and_then(|v| v.get("prompt_tokens"))),
-            completion_tokens: json_u64(usage.and_then(|v| v.get("completion_tokens"))),
-            total_tokens: json_u64(usage.and_then(|v| v.get("total_tokens"))),
+            prompt_tokens,
+            cached_tokens: cached.min(prompt_tokens),
+            completion_tokens: completion,
+            total_tokens: if total == 0 {
+                prompt_tokens.saturating_add(completion)
+            } else {
+                total
+            },
         }
+    }
+
+    pub fn uncached_prompt_tokens(&self) -> u64 {
+        self.prompt_tokens.saturating_sub(self.cached_tokens)
     }
 }
 
@@ -36,45 +73,68 @@ impl TokenUsage {
 pub struct RequestLog {
     pub ts: i64,
     pub day: String,
+    pub month: String,
     pub time: String,
     pub channel: String,
     pub channel_id: Option<u64>,
+    pub requested_model: String,
     pub model: String,
+    pub route: String,
+    pub route_reason: String,
     pub status: u16,
     pub latency_ms: u64,
     pub latency: String,
     #[serde(default)]
     pub prompt_tokens: u64,
     #[serde(default)]
+    pub cached_tokens: u64,
+    #[serde(default)]
+    pub uncached_prompt_tokens: u64,
+    #[serde(default)]
     pub completion_tokens: u64,
     #[serde(default)]
     pub total_tokens: u64,
+    #[serde(default)]
+    pub cost_cny: f64,
 }
 
 impl RequestLog {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         channel_id: Option<u64>,
         channel: String,
-        model: String,
+        requested_model: String,
+        actual_model: String,
+        route: String,
+        route_reason: String,
         status: u16,
         latency_ms: u64,
         usage: TokenUsage,
     ) -> Self {
         let ts = now_unix_secs();
         let (day, time) = shanghai_strings(ts);
+        let month = day.get(0..7).unwrap_or("").to_string();
+        let cost_cny = estimate_cost_cny(&actual_model, usage);
         Self {
             ts,
             day,
+            month,
             time,
             channel,
             channel_id,
-            model: normalize_key(model, "unknown"),
+            requested_model: normalize_key(requested_model, "unknown"),
+            model: normalize_key(actual_model, "unknown"),
+            route: normalize_key(route, "default"),
+            route_reason,
             status,
             latency_ms,
             latency: format!("{}ms", latency_ms),
             prompt_tokens: usage.prompt_tokens,
+            cached_tokens: usage.cached_tokens,
+            uncached_prompt_tokens: usage.uncached_prompt_tokens(),
             completion_tokens: usage.completion_tokens,
             total_tokens: usage.total_tokens,
+            cost_cny,
         }
     }
 }
@@ -92,9 +152,15 @@ pub struct UsageBucket {
     #[serde(default)]
     pub prompt_tokens: u64,
     #[serde(default)]
+    pub cached_tokens: u64,
+    #[serde(default)]
+    pub uncached_prompt_tokens: u64,
+    #[serde(default)]
     pub completion_tokens: u64,
     #[serde(default)]
     pub total_tokens: u64,
+    #[serde(default)]
+    pub cost_cny: f64,
 }
 
 impl UsageBucket {
@@ -107,8 +173,13 @@ impl UsageBucket {
         }
         self.latency_ms = self.latency_ms.saturating_add(log.latency_ms);
         self.prompt_tokens = self.prompt_tokens.saturating_add(log.prompt_tokens);
+        self.cached_tokens = self.cached_tokens.saturating_add(log.cached_tokens);
+        self.uncached_prompt_tokens = self
+            .uncached_prompt_tokens
+            .saturating_add(log.uncached_prompt_tokens);
         self.completion_tokens = self.completion_tokens.saturating_add(log.completion_tokens);
         self.total_tokens = self.total_tokens.saturating_add(log.total_tokens);
+        self.cost_cny += log.cost_cny;
     }
 }
 
@@ -119,9 +190,13 @@ pub struct UsageStats {
     #[serde(default)]
     pub by_day: BTreeMap<String, UsageBucket>,
     #[serde(default)]
+    pub by_month: BTreeMap<String, UsageBucket>,
+    #[serde(default)]
     pub by_channel: BTreeMap<String, UsageBucket>,
     #[serde(default)]
     pub by_model: BTreeMap<String, UsageBucket>,
+    #[serde(default)]
+    pub by_route: BTreeMap<String, UsageBucket>,
     #[serde(default)]
     pub recent: Vec<RequestLog>,
 }
@@ -130,6 +205,10 @@ impl UsageStats {
     pub fn record(&mut self, log: RequestLog) {
         self.total.add(&log);
         self.by_day.entry(log.day.clone()).or_default().add(&log);
+        self.by_month
+            .entry(log.month.clone())
+            .or_default()
+            .add(&log);
         self.by_channel
             .entry(normalize_key(log.channel.clone(), "unknown-channel"))
             .or_default()
@@ -138,12 +217,91 @@ impl UsageStats {
             .entry(normalize_key(log.model.clone(), "unknown-model"))
             .or_default()
             .add(&log);
+        self.by_route
+            .entry(normalize_key(log.route.clone(), "unknown-route"))
+            .or_default()
+            .add(&log);
 
         self.recent.push(log);
         if self.recent.len() > RECENT_LIMIT {
             let remove = self.recent.len() - RECENT_LIMIT;
             self.recent.drain(0..remove);
         }
+    }
+
+    pub fn current_month_cost(&self) -> f64 {
+        let (day, _) = shanghai_strings(now_unix_secs());
+        let month = day.get(0..7).unwrap_or("");
+        self.by_month
+            .get(month)
+            .map(|bucket| bucket.cost_cny)
+            .unwrap_or(0.0)
+    }
+}
+
+pub fn estimate_cost_cny(model: &str, usage: TokenUsage) -> f64 {
+    let price = price_for_model(model);
+    usage.cached_tokens as f64 / 1_000_000.0 * price.cached_input
+        + usage.uncached_prompt_tokens() as f64 / 1_000_000.0 * price.input
+        + usage.completion_tokens as f64 / 1_000_000.0 * price.output
+}
+
+#[derive(Debug, Serialize, Clone, Copy)]
+pub struct ModelPrice {
+    pub cached_input: f64,
+    pub input: f64,
+    pub output: f64,
+}
+
+pub fn pricing_snapshot() -> BTreeMap<String, ModelPrice> {
+    let mut data = BTreeMap::new();
+    data.insert(
+        "deepseek-v4-flash".to_string(),
+        ModelPrice {
+            cached_input: 0.02,
+            input: 1.0,
+            output: 2.0,
+        },
+    );
+    data.insert(
+        "deepseek-v4-pro-discount".to_string(),
+        ModelPrice {
+            cached_input: 0.025,
+            input: 3.0,
+            output: 6.0,
+        },
+    );
+    data.insert(
+        "deepseek-v4-pro-full".to_string(),
+        ModelPrice {
+            cached_input: 0.1,
+            input: 12.0,
+            output: 24.0,
+        },
+    );
+    data
+}
+
+fn price_for_model(model: &str) -> ModelPrice {
+    let key = model.to_lowercase();
+    if key.contains("deepseek") && key.contains("pro") {
+        return ModelPrice {
+            cached_input: 0.025,
+            input: 3.0,
+            output: 6.0,
+        };
+    }
+    if key.contains("deepseek") || key.contains("v4-flash") {
+        return ModelPrice {
+            cached_input: 0.02,
+            input: 1.0,
+            output: 2.0,
+        };
+    }
+    ModelPrice {
+        cached_input: 0.0,
+        input: 0.0,
+        output: 0.0,
     }
 }
 
@@ -168,8 +326,17 @@ pub fn save_stats<P: AsRef<Path>>(path: P, stats: &UsageStats) {
     let _ = fs::write(path, data);
 }
 
-fn json_u64(value: Option<&Value>) -> u64 {
-    value.and_then(Value::as_u64).unwrap_or(0)
+fn first_u64(root: Option<&Value>, paths: &[&[&str]]) -> u64 {
+    for path in paths {
+        let mut current = root;
+        for key in *path {
+            current = current.and_then(|v| v.get(*key));
+        }
+        if let Some(value) = current.and_then(Value::as_u64) {
+            return value;
+        }
+    }
+    0
 }
 
 fn normalize_key(value: String, fallback: &str) -> String {

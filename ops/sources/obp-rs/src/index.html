@@ -1,468 +1,210 @@
 <!DOCTYPE html>
-<html lang="zh-CN" x-data="app()" :class="{ 'dark': darkMode }">
+<html lang="zh-CN" x-data="app()" :class="{ dark }">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OBP 控制台</title>
+  <title>OBP 智能模型网关</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script>tailwind.config={darkMode:'class'}</script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <style>[x-cloak]{display:none!important}</style>
+  <style>
+    [x-cloak]{display:none!important}
+    .mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+    .panel{background:rgba(255,255,255,.88);border:1px solid rgb(231 229 228);border-radius:1.5rem;box-shadow:0 18px 50px rgba(68,64,60,.08)}
+    .dark .panel{background:rgba(15,23,42,.88);border-color:rgb(30 41 59)}
+    .card{background:white;border:1px solid rgb(231 229 228);border-radius:1rem;padding:.95rem}
+    .dark .card,.dark .subcard{background:rgb(15 23 42);border-color:rgb(30 41 59)}
+    .subcard{background:rgb(250 250 249);border:1px solid rgb(231 229 228);border-radius:.9rem;padding:.75rem}
+    .k{font-size:.75rem;color:rgb(100 116 139)}
+    .v{font-size:1.55rem;font-weight:900;letter-spacing:-.04em}
+    .input{width:100%;border:1px solid rgb(203 213 225);border-radius:.85rem;padding:.58rem .72rem;background:white;outline:none}
+    .input:focus{border-color:rgb(13 148 136);box-shadow:0 0 0 3px rgba(20,184,166,.15)}
+    .dark .input{background:rgb(2 6 23);border-color:rgb(51 65 85)}
+    .field{display:block}.field span{display:block;margin:0 0 .35rem .15rem;font-size:.78rem;font-weight:800;color:rgb(100 116 139)}
+    .th{text-align:left;padding:.78rem 1rem;font-weight:800;white-space:nowrap}.td{padding:.9rem 1rem;vertical-align:top}
+    .badge{display:inline-flex;align-items:center;border-radius:.7rem;padding:.2rem .55rem;background:rgb(241 245 249);font-size:.75rem;font-weight:900}
+    .badge.ok{background:rgb(220 252 231);color:rgb(22 101 52)}.badge.bad{background:rgb(254 226 226);color:rgb(190 18 60)}
+    .dark .badge{background:rgb(30 41 59)}.dark .badge.ok{background:rgba(16,185,129,.18);color:rgb(110 231 183)}.dark .badge.bad{background:rgba(244,63,94,.16);color:rgb(251 113 133)}
+    .btn{display:inline-flex;align-items:center;border:1px solid rgb(203 213 225);border-radius:.75rem;padding:.4rem .7rem;font-size:.78rem;font-weight:800}.dark .btn{border-color:rgb(51 65 85)}
+    .btn.danger{color:rgb(225 29 72);border-color:rgb(253 164 175)}.line{display:flex;justify-content:space-between;gap:.75rem;border-bottom:1px solid rgb(231 229 228);padding:.58rem 0;font-size:.84rem}.dark .line{border-color:rgb(30 41 59)}
+  </style>
 </head>
-<body class="min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors" x-cloak>
-  <div class="max-w-7xl mx-auto px-4 py-6 md:px-6 md:py-8" x-init="init()">
-    <header class="mb-6">
-      <div class="flex flex-wrap items-center justify-between gap-3">
+<body x-cloak class="min-h-screen bg-[radial-gradient(circle_at_top_left,#d9f99d33,transparent_32%),linear-gradient(135deg,#f5f5f4,#ecfeff)] dark:bg-[radial-gradient(circle_at_top_left,#064e3b55,transparent_32%),linear-gradient(135deg,#020617,#0f172a)] text-slate-900 dark:text-slate-100">
+  <div class="max-w-7xl mx-auto p-4 md:p-7" x-init="init()">
+    <header class="mb-5 panel p-5">
+      <div class="flex flex-wrap justify-between gap-4">
         <div>
-          <h1 class="text-2xl md:text-3xl font-black tracking-tight text-indigo-600 dark:text-indigo-400">OBP 控制台</h1>
-          <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">统一管理 OpenAI / Gemini 转发与 529 备用模型切换</p>
+          <div class="text-xs font-black tracking-[.22em] text-teal-700 dark:text-teal-300">MODEL ROUTER</div>
+          <h1 class="text-3xl md:text-4xl font-black tracking-tight mt-1">OBP 智能模型网关</h1>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mt-2">默认走 Flash 省钱，复杂任务升级 Pro，异常时回落 LongCat/保底模型；每次调用都记录路由和成本。</p>
         </div>
-        <div class="flex items-center gap-2">
-          <button @click="refreshNow()" class="px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700">??</button>
-          <button @click="toggleAutoRefresh()" class="px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700" x-text="autoRefresh ? '自动刷新：开' : '自动刷新：关'"></button>
-          <button @click="toggleDarkMode()" class="px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700" x-text="darkMode ? '浅色模式' : '深色模式'"></button>
-          <button @click="openAdd()" class="px-4 py-2 text-sm font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700">新增渠道</button>
+        <div class="flex flex-wrap items-start gap-2">
+          <button @click="refresh()" class="px-3 py-2 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-sm font-bold">刷新</button>
+          <button @click="dark=!dark;localStorage.obp_theme=dark?'dark':'light'" class="btn" x-text="dark?'浅色':'深色'"></button>
+          <button @click="openAdd()" class="px-3 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-sm font-bold">新增渠道</button>
         </div>
       </div>
-      <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
-        <span class="text-slate-500 dark:text-slate-400">API 入口</span>
-        <button @click="copy(window.location.origin + '/v1')" class="px-3 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 font-mono" x-text="copied ? '已复制' : (window.location.origin + '/v1')"></button>
-        <span class="text-slate-400 ml-2" x-text="'上次刷新：' + lastRefresh"></span>
+      <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
+        <span class="text-slate-500">API 入口</span>
+        <button @click="copy(apiUrl)" class="mono px-3 py-1.5 rounded-lg border border-stone-300 dark:border-slate-700 bg-stone-50 dark:bg-slate-950" x-text="copied?'已复制':apiUrl"></button>
+        <span class="text-slate-400" x-text="'刷新：' + lastRefresh"></span>
       </div>
     </header>
 
     <main class="grid grid-cols-1 xl:grid-cols-12 gap-4">
       <section class="xl:col-span-8 space-y-4">
-        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-            <div class="text-xs text-slate-500">渠道总数</div>
-            <div class="text-2xl font-bold mt-1" x-text="channels.length"></div>
-          </div>
-          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-            <div class="text-xs text-slate-500">可用渠道</div>
-            <div class="text-2xl font-bold mt-1 text-emerald-600" x-text="activeCount"></div>
-          </div>
-          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-            <div class="text-xs text-slate-500">今日请求</div>
-            <div class="text-2xl font-bold mt-1 text-sky-600 dark:text-sky-300" x-text="todayRequests"></div>
-          </div>
-          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-            <div class="text-xs text-slate-500">近 7 天</div>
-            <div class="text-2xl font-bold mt-1" x-text="sevenDayRequests"></div>
-          </div>
-          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-            <div class="text-xs text-slate-500">成功率</div>
-            <div class="text-2xl font-bold mt-1 text-emerald-600" x-text="successRate"></div>
-          </div>
-          <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-            <div class="text-xs text-slate-500">总 Token</div>
-            <div class="text-2xl font-bold mt-1" x-text="formatNumber(totalTokens)"></div>
-          </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="card"><div class="k">今日请求</div><div class="v" x-text="today.requests||0"></div></div>
+          <div class="card"><div class="k">本月成本</div><div class="v text-amber-600" x-text="money(month.cost_cny)"></div></div>
+          <div class="card"><div class="k">成功率</div><div class="v text-emerald-600" x-text="successRate"></div></div>
+          <div class="card"><div class="k">总 Token</div><div class="v" x-text="fmt(stats.total?.total_tokens)"></div></div>
         </div>
 
-        <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-          <div class="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
-            <h2 class="font-semibold">渠道管理</h2>
-            <div class="flex items-center gap-2">
-              <input x-model.trim="search" placeholder="搜索名称 / 模型" class="px-3 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 w-52">
-              <select x-model="statusFilter" class="px-2 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-                <option value="all">全部状态</option>
-                <option value="active">仅可用</option>
-                <option value="error">仅异常</option>
-              </select>
+        <section class="panel p-4">
+          <div class="flex flex-wrap justify-between gap-3 mb-3">
+            <div>
+              <h2 class="font-black text-lg">智能路由</h2>
+              <p class="text-xs text-slate-500 mt-1">根据关键词、上下文长度、消息数量、月度预算和上游状态选择模型。Dry-run 会记录“本来会怎么切”，但不真正改模型。</p>
             </div>
+            <button @click="saveRouter()" class="px-3 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-sm font-bold" x-text="routerSaving?'保存中':'保存路由配置'"></button>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <label class="flex items-center gap-2"><input type="checkbox" x-model="router.enabled">启用智能路由</label>
+            <label class="flex items-center gap-2"><input type="checkbox" x-model="router.dry_run">Dry-run 只记录不切换</label>
+            <label class="field"><span>默认模型</span><input x-model="router.default_model" class="input mono"></label>
+            <label class="field"><span>高级模型</span><input x-model="router.pro_model" class="input mono"></label>
+            <label class="field"><span>应急模型</span><input x-model="router.emergency_model" class="input mono"></label>
+            <label class="field"><span>保底模型</span><input x-model="router.backup_model" class="input mono"></label>
+            <label class="field"><span>升级 Pro 字符数</span><input x-model.number="router.pro_prompt_chars" type="number" class="input"></label>
+            <label class="field"><span>升级 Pro 消息数</span><input x-model.number="router.pro_message_count" type="number" class="input"></label>
+            <label class="field"><span>月度提醒 / 元</span><input x-model.number="router.monthly_warn_rmb" type="number" step="0.1" class="input"></label>
+            <label class="field"><span>月度降级 / 元</span><input x-model.number="router.monthly_downgrade_rmb" type="number" step="0.1" class="input"></label>
+            <label class="field"><span>月度熔断 / 元</span><input x-model.number="router.monthly_hard_limit_rmb" type="number" step="0.1" class="input"></label>
+            <label class="field"><span>Pro 关键词</span><input x-model="keywordText" @change="router.pro_keywords=splitList(keywordText)" class="input"></label>
+          </div>
+        </section>
+
+        <section class="panel overflow-hidden">
+          <div class="p-4 border-b border-stone-200 dark:border-slate-800 flex justify-between gap-3">
+            <h2 class="font-black text-lg">渠道</h2>
+            <div class="text-xs text-slate-500">角色：default / pro / emergency / backup</div>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
-              <thead class="bg-slate-50 dark:bg-slate-900 text-slate-500">
-                <tr>
-                  <th class="text-left px-4 py-3 font-medium">渠道</th>
-                  <th class="text-left px-4 py-3 font-medium">模型范围</th>
-                  <th class="text-left px-4 py-3 font-medium">状态</th>
-                  <th class="text-left px-4 py-3 font-medium">最近检测</th>
-                  <th class="text-right px-4 py-3 font-medium">操作</th>
-                </tr>
+              <thead class="bg-stone-50 dark:bg-slate-950 text-slate-500">
+                <tr><th class="th">渠道</th><th class="th">角色</th><th class="th">模型</th><th class="th">状态</th><th class="th text-right">操作</th></tr>
               </thead>
-              <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
-                <template x-for="ch in filteredChannels" :key="ch.id">
-                  <tr class="hover:bg-slate-50 dark:hover:bg-slate-900/60">
-                    <td class="px-4 py-3">
-                      <div class="font-semibold" x-text="ch.name"></div>
-                      <div class="text-xs text-slate-500 mt-1">
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300" x-text="ch.type"></span>
-                        <span class="ml-2">请求数: <span x-text="ch.requests || 0"></span></span>
-                      </div>
-                    </td>
-                    <td class="px-4 py-3 font-mono text-xs" x-text="ch.models === '*' ? '全部模型 (*)' : ch.models"></td>
-                    <td class="px-4 py-3">
-                      <span :class="ch.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'" class="px-2 py-1 rounded-md text-xs font-semibold" x-text="ch.status"></span>
-                    </td>
-                    <td class="px-4 py-3 text-xs text-slate-500" x-text="ch.last_test || '-'"></td>
-                    <td class="px-4 py-3">
-                      <div class="flex justify-end gap-2">
-                        <button @click="testChannel(ch.id)" class="px-2.5 py-1.5 rounded-lg text-xs border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700">测试</button>
-                        <button @click="openEdit(ch)" class="px-2.5 py-1.5 rounded-lg text-xs border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700">编辑</button>
-                        <button @click="deleteChannel(ch.id)" class="px-2.5 py-1.5 rounded-lg text-xs border border-rose-300 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30">删除</button>
-                      </div>
-                    </td>
+              <tbody class="divide-y divide-stone-100 dark:divide-slate-800">
+                <template x-for="ch in channels" :key="ch.id">
+                  <tr class="hover:bg-stone-50 dark:hover:bg-slate-950/60">
+                    <td class="td"><div class="font-bold" x-text="ch.name"></div><div class="text-xs text-slate-500 max-w-xs truncate" x-text="ch.base"></div></td>
+                    <td class="td"><span class="badge" x-text="ch.role||'default'"></span><div class="text-xs text-slate-500 mt-1" x-text="'优先级 ' + (ch.priority||100)"></div></td>
+                    <td class="td mono text-xs"><div x-text="ch.models||'*'"></div><div class="text-slate-500 truncate max-w-xs" x-text="ch.model_mapping||''"></div></td>
+                    <td class="td"><span :class="(ch.status==='active'||!ch.status)?'ok':'bad'" class="badge" x-text="ch.status||'active'"></span><div class="text-xs text-slate-500 mt-1" x-text="'请求 ' + (ch.requests||0) + ' / 失败 ' + (ch.fail_count||0)"></div></td>
+                    <td class="td text-right"><button @click="openEdit(ch)" class="btn mr-1">编辑</button><button @click="deleteChannel(ch.id)" class="btn danger">删除</button></td>
                   </tr>
                 </template>
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
 
-        <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4">
-          <h2 class="font-semibold mb-3">系统日志</h2>
-          <div class="max-h-72 overflow-auto pr-1 space-y-2">
-            <template x-for="log in logs" :key="log.time + log.model + log.channel">
-              <div class="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 bg-slate-50 dark:bg-slate-900">
-                <div class="flex items-center justify-between text-xs">
-                  <span class="text-slate-500 font-mono" x-text="log.time"></span>
-                  <span :class="String(log.status)==='200' ? 'text-emerald-600' : 'text-rose-600'" class="font-semibold" x-text="log.status"></span>
-                </div>
-                <div class="mt-1 text-sm font-medium truncate" x-text="log.model"></div>
-                <div class="mt-1 text-xs text-slate-500 flex items-center justify-between">
-                  <span x-text="log.channel"></span>
-                  <span x-text="(log.latency || (log.latency_ms + 'ms')) + (log.total_tokens ? ' · ' + formatNumber(log.total_tokens) + ' tokens' : '')"></span>
-                </div>
+        <section class="panel p-4">
+          <h2 class="font-black text-lg mb-3">最近调用</h2>
+          <div class="space-y-2 max-h-96 overflow-auto">
+            <template x-for="log in logs.slice().reverse()" :key="log.ts + log.channel + log.model + log.latency_ms">
+              <div class="rounded-xl border border-stone-200 dark:border-slate-800 bg-stone-50 dark:bg-slate-950 p-3">
+                <div class="flex justify-between gap-2 text-xs"><span class="mono text-slate-500" x-text="log.time"></span><span :class="String(log.status).startsWith('2')?'text-emerald-600':'text-rose-600'" x-text="log.status"></span></div>
+                <div class="mt-1 font-bold" x-text="(log.requested_model||log.model) + ' → ' + log.model + ' / ' + log.route"></div>
+                <div class="text-xs text-slate-500 mt-1" x-text="log.channel + ' / ' + (log.route_reason||'-')"></div>
+                <div class="text-xs text-slate-500 mt-1" x-text="'tokens ' + fmt(log.total_tokens) + ' / 缓存 ' + fmt(log.cached_tokens) + ' / 成本 ' + money(log.cost_cny)"></div>
               </div>
             </template>
-            <div x-show="logs.length === 0" class="text-sm text-slate-500 py-6 text-center">暂无日志</div>
+            <div x-show="logs.length===0" class="text-center text-sm text-slate-500 py-8">暂无调用日志</div>
           </div>
-        </div>
+        </section>
       </section>
 
       <aside class="xl:col-span-4 space-y-4">
-        <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4">
-          <div class="flex items-center justify-between gap-2 mb-3">
-            <h2 class="font-semibold">调用统计</h2>
-            <button @click="clearStats()" class="px-2.5 py-1.5 rounded-lg text-xs border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700">清空</button>
+        <section class="panel p-4">
+          <h2 class="font-black text-lg mb-3">成本账本</h2>
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div class="subcard"><div class="k">本月请求</div><div class="v" x-text="month.requests||0"></div></div>
+            <div class="subcard"><div class="k">本月成本</div><div class="v text-amber-600" x-text="money(month.cost_cny)"></div></div>
+            <div class="subcard"><div class="k">缓存命中</div><div class="v" x-text="fmt(month.cached_tokens)"></div></div>
+            <div class="subcard"><div class="k">未命中输入</div><div class="v" x-text="fmt(month.uncached_prompt_tokens)"></div></div>
           </div>
-          <div class="grid grid-cols-2 gap-2 text-sm mb-4">
-            <div class="rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3">
-              <div class="text-xs text-slate-500">总请求</div>
-              <div class="text-xl font-bold mt-1" x-text="formatNumber(totalRequests)"></div>
-            </div>
-            <div class="rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3">
-              <div class="text-xs text-slate-500">平均耗时</div>
-              <div class="text-xl font-bold mt-1" x-text="avgLatency"></div>
-            </div>
+          <div class="mt-4 h-3 rounded-full bg-stone-200 dark:bg-slate-800 overflow-hidden">
+            <div class="h-full bg-gradient-to-r from-emerald-500 to-amber-500" :style="'width:'+budgetPct+'%'"></div>
           </div>
-          <div class="space-y-4 text-xs">
-            <div>
-              <div class="font-semibold mb-2 text-slate-600 dark:text-slate-300">按渠道</div>
-              <template x-for="item in topChannels" :key="item.name">
-                <div class="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-700 last:border-0">
-                  <span class="truncate pr-2" x-text="item.name"></span>
-                  <span class="font-mono text-slate-500" x-text="formatNumber(item.requests) + ' 次'"></span>
-                </div>
-              </template>
-              <div x-show="topChannels.length === 0" class="text-slate-500 py-2">暂无调用</div>
-            </div>
-            <div>
-              <div class="font-semibold mb-2 text-slate-600 dark:text-slate-300">按模型</div>
-              <template x-for="item in topModels" :key="item.name">
-                <div class="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-700 last:border-0">
-                  <span class="truncate pr-2" x-text="item.name"></span>
-                  <span class="font-mono text-slate-500" x-text="formatNumber(item.requests) + ' 次'"></span>
-                </div>
-              </template>
-              <div x-show="topModels.length === 0" class="text-slate-500 py-2">暂无调用</div>
-            </div>
-          </div>
-        </div>
+          <div class="text-xs text-slate-500 mt-2" x-text="'预算进度：' + budgetPct + '% / 熔断 ' + money(router.monthly_hard_limit_rmb)"></div>
+        </section>
 
-        <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4">
-          <h2 class="font-semibold mb-3">529 自动切换</h2>
-          <div class="space-y-3 text-sm">
-            <label class="flex items-center gap-2">
-              <input type="checkbox" x-model="failover.enabled" class="rounded">
-              <span>启用 529 备用模型切换</span>
-            </label>
-            <div>
-              <label class="block text-xs text-slate-500 mb-1">备用 API 地址</label>
-              <input x-model="failover.api_base" placeholder="例如: http://150.158.121.88:8000/v1" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-            </div>
-            <div>
-              <label class="block text-xs text-slate-500 mb-1">备用模型名称</label>
-              <input x-model="failover.model" placeholder="LongCat-Flash-Chat" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="block text-xs text-slate-500 mb-1">触发阈值</label>
-                <input x-model.number="failover.trigger_529_count" type="number" min="1" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-              </div>
-              <div>
-                <label class="block text-xs text-slate-500 mb-1">回切秒数</label>
-                <input x-model.number="failover.recover_seconds" type="number" min="30" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-              </div>
-            </div>
-            <div>
-              <label class="block text-xs text-slate-500 mb-1">备用 API Key（可选）</label>
-              <input x-model="failover.api_key" type="password" placeholder="留空使用服务端默认" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-            </div>
-            <div class="flex items-center justify-between">
-              <span class="text-xs text-slate-500" x-text="failoverSaveStatus || '未保存变更'"></span>
-              <button @click="saveFailover()" class="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700">保存配置</button>
-            </div>
-          </div>
-        </div>
+        <section class="panel p-4">
+          <h2 class="font-black text-lg mb-3">按模型</h2>
+          <template x-for="item in bucketList(stats.by_model)" :key="item.name">
+            <div class="line"><span class="truncate" x-text="item.name"></span><span class="mono" x-text="money(item.cost_cny) + ' / ' + fmt(item.requests) + '次'"></span></div>
+          </template>
+        </section>
 
-        <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4">
-          <h2 class="font-semibold mb-2">使用建议</h2>
-          <ul class="text-xs text-slate-500 space-y-1 leading-5">
-            <li>1. 新增渠道后先点“测试”，确认成功再投入流量。</li>
-            <li>2. 备用模型建议配置 LongCat，减少高峰 529 中断。</li>
-            <li>3. 阈值建议 2-3；回切时间建议 10-20 分钟。</li>
-          </ul>
-        </div>
+        <section class="panel p-4">
+          <h2 class="font-black text-lg mb-3">按路由</h2>
+          <template x-for="item in bucketList(stats.by_route)" :key="item.name">
+            <div class="line"><span x-text="item.name"></span><span class="mono" x-text="fmt(item.requests) + '次 / ' + money(item.cost_cny)"></span></div>
+          </template>
+        </section>
+
+        <section class="panel p-4">
+          <h2 class="font-black text-lg mb-2">价格表</h2>
+          <template x-for="[name,p] in Object.entries(pricing)" :key="name">
+            <div class="text-xs border-b border-stone-100 dark:border-slate-800 py-2">
+              <div class="font-bold mono" x-text="name"></div>
+              <div class="text-slate-500" x-text="'缓存 ' + p.cached_input + ' / 输入 ' + p.input + ' / 输出 ' + p.output + ' 元/百万 tokens'"></div>
+            </div>
+          </template>
+        </section>
       </aside>
     </main>
 
-    <div x-show="showForm" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" x-transition.opacity>
-      <div class="w-full max-w-2xl rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl">
-        <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-          <h3 class="font-semibold" x-text="isEdit ? '编辑渠道' : '新增渠道'"></h3>
-          <button @click="showForm = false" class="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">关闭</button>
+    <div x-show="showForm" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div class="w-full max-w-2xl panel p-5">
+        <div class="flex justify-between mb-4"><h3 class="font-black" x-text="isEdit?'编辑渠道':'新增渠道'"></h3><button @click="showForm=false" class="btn">关闭</button></div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+          <label class="field"><span>名称</span><input x-model="form.name" class="input"></label>
+          <label class="field"><span>类型</span><input x-model="form.type" class="input"></label>
+          <label class="field"><span>角色</span><select x-model="form.role" class="input"><option>default</option><option>pro</option><option>emergency</option><option>backup</option></select></label>
+          <label class="field"><span>优先级</span><input x-model.number="form.priority" type="number" class="input"></label>
+          <label class="field"><span>Base URL</span><input x-model="form.base" class="input mono"></label>
+          <label class="field"><span>模型范围</span><input x-model="form.models" class="input mono"></label>
+          <label class="field"><span>API Key</span><input x-model="form.key" type="password" class="input mono"></label>
+          <label class="field"><span>成本模型</span><input x-model="form.cost_model" class="input mono"></label>
+          <label class="field md:col-span-2"><span>模型映射 JSON</span><input x-model="form.model_mapping" class="input mono"></label>
         </div>
-        <div class="p-5 space-y-4 text-sm">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs text-slate-500 mb-1">渠道名称</label>
-              <input x-model="formCh.name" placeholder="例如: LongCat-2751" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-            </div>
-            <div>
-              <label class="block text-xs text-slate-500 mb-1">渠道类型</label>
-              <select x-model="formCh.type" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-                <option value="openai">OpenAI / Proxy</option>
-                <option value="gemini">Google Gemini</option>
-              </select>
-            </div>
-          </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs text-slate-500 mb-1">Base URL</label>
-              <input x-model="formCh.base" placeholder="https://api.longcat.chat/openai" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-            </div>
-            <div>
-              <label class="block text-xs text-slate-500 mb-1">模型范围（逗号分隔）</label>
-              <input x-model="formCh.models" placeholder="*, LongCat-Flash-Chat" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-            </div>
-          </div>
-          <div>
-            <label class="block text-xs text-slate-500 mb-1">API Key</label>
-            <input x-model="formCh.key" type="password" placeholder="sk-..." class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono">
-          </div>
-          <div>
-            <label class="block text-xs text-slate-500 mb-1">模型映射（JSON，可选）</label>
-            <input x-model="formCh.model_mapping" placeholder='{"gpt-4o":"LongCat-Flash-Chat"}' class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs">
-          </div>
-          <div class="flex items-center justify-between pt-1">
-            <div class="flex gap-2">
-              <button @click="preset('openai')" class="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs">预设 OpenAI</button>
-              <button @click="preset('gemini')" class="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs">预设 Gemini</button>
-            </div>
-            <button @click="testUnsaved()" class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs hover:bg-slate-100 dark:hover:bg-slate-700" x-text="testStatus || '测试连接'"></button>
-          </div>
-          <div class="flex justify-end gap-2">
-            <button @click="showForm = false" class="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-sm">取消</button>
-            <button @click="saveChannel()" class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700">保存</button>
-          </div>
-        </div>
+        <div class="flex justify-end gap-2 mt-5"><button @click="showForm=false" class="btn">取消</button><button @click="saveChannel()" class="px-4 py-2 rounded-xl bg-teal-700 text-white font-bold">保存</button></div>
       </div>
     </div>
   </div>
 
   <script>
-    function app() {
-      return {
-        channels: [],
-        logs: [],
-        stats: { total: { requests: 0, success: 0, errors: 0, latency_ms: 0, total_tokens: 0 }, by_day: {}, by_channel: {}, by_model: {}, recent: [] },
-        showForm: false,
-        isEdit: false,
-        testStatus: '',
-        copied: false,
-        darkMode: localStorage.getItem('theme') === 'dark',
-        autoRefresh: localStorage.getItem('obp_auto_refresh') !== 'off',
-        dataTimer: null,
-        failoverTimer: null,
-        lastRefresh: '-',
-        search: '',
-        statusFilter: 'all',
-        failover: { enabled: true, api_base: '', api_key: '', model: 'LongCat-Flash-Chat', trigger_529_count: 3, recover_seconds: 900 },
-        failoverSaveStatus: '',
-        formCh: { name: '', type: 'openai', key: '', base: '', models: '*', model_mapping: '' },
-        get activeCount() { return this.channels.filter(c => c.status === 'active').length; },
-        get errorCount() { return this.channels.filter(c => c.status !== 'active').length; },
-        get totalRequests() { return this.stats.total?.requests || 0; },
-        get totalTokens() { return this.stats.total?.total_tokens || 0; },
-        get todayKey() { return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }); },
-        get todayRequests() { return this.stats.by_day?.[this.todayKey]?.requests || 0; },
-        get sevenDayRequests() {
-          let sum = 0;
-          for (let i = 0; i < 7; i++) {
-            const day = new Date(Date.now() - i * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
-            sum += this.stats.by_day?.[day]?.requests || 0;
-          }
-          return sum;
-        },
-        get successRate() {
-          const total = this.stats.total?.requests || 0;
-          if (!total) return '-';
-          return (Math.round(((this.stats.total?.success || 0) * 1000) / total) / 10) + '%';
-        },
-        get avgLatency() {
-          const total = this.stats.total?.requests || 0;
-          if (!total) return '-';
-          return Math.round((this.stats.total?.latency_ms || 0) / total) + 'ms';
-        },
-        get topChannels() { return this.bucketList(this.stats.by_channel); },
-        get topModels() { return this.bucketList(this.stats.by_model); },
-        get filteredChannels() {
-          return this.channels.filter(c => {
-            const text = (c.name + ' ' + (c.models || '')).toLowerCase();
-            const passText = !this.search || text.includes(this.search.toLowerCase());
-            const passStatus = this.statusFilter === 'all' || c.status === this.statusFilter;
-            return passText && passStatus;
-          });
-        },
-        init() {
-          this.refreshNow();
-          this.startAutoRefresh();
-        },
-        startAutoRefresh() {
-          if (this.dataTimer) clearInterval(this.dataTimer);
-          if (this.failoverTimer) clearInterval(this.failoverTimer);
-          if (!this.autoRefresh) return;
-          this.dataTimer = setInterval(() => this.fetchData(), 2500);
-          this.failoverTimer = setInterval(() => this.fetchFailover(), 10000);
-        },
-        toggleAutoRefresh() {
-          this.autoRefresh = !this.autoRefresh;
-          localStorage.setItem('obp_auto_refresh', this.autoRefresh ? 'on' : 'off');
-          this.startAutoRefresh();
-        },
-        async refreshNow() {
-          await Promise.all([this.fetchData(), this.fetchFailover()]);
-          this.lastRefresh = new Date().toLocaleTimeString();
-        },
-        toggleDarkMode() {
-          this.darkMode = !this.darkMode;
-          localStorage.setItem('theme', this.darkMode ? 'dark' : 'light');
-        },
-        openAdd() {
-          this.isEdit = false;
-          this.testStatus = '';
-          this.formCh = { name: '', type: 'openai', key: '', base: 'https://api.longcat.chat/openai', models: '*', model_mapping: '' };
-          this.showForm = true;
-        },
-        openEdit(ch) {
-          this.isEdit = true;
-          this.testStatus = '';
-          this.formCh = { ...ch };
-          this.showForm = true;
-        },
-        preset(type) {
-          if (type === 'gemini') {
-            this.formCh.type = 'gemini';
-            this.formCh.base = 'https://generativelanguage.googleapis.com/v1beta/models/';
-            this.formCh.models = 'gemini-1.5-flash,gemini-1.5-pro';
-          } else {
-            this.formCh.type = 'openai';
-            this.formCh.base = 'https://api.longcat.chat/openai';
-            this.formCh.models = '*';
-          }
-        },
-        copy(text) {
-          navigator.clipboard.writeText(text);
-          this.copied = true;
-          setTimeout(() => this.copied = false, 1500);
-        },
-        emptyStats() {
-          return { total: { requests: 0, success: 0, errors: 0, latency_ms: 0, total_tokens: 0 }, by_day: {}, by_channel: {}, by_model: {}, recent: [] };
-        },
-        formatNumber(value) {
-          return new Intl.NumberFormat('zh-CN').format(value || 0);
-        },
-        bucketList(map) {
-          return Object.entries(map || {})
-            .map(([name, bucket]) => ({ name, ...(bucket || {}) }))
-            .sort((a, b) => (b.requests || 0) - (a.requests || 0))
-            .slice(0, 6);
-        },
-        async clearStats() {
-          if (!confirm('确定清空 OBP 调用统计吗？')) return;
-          await fetch('/admin/stats', { method: 'DELETE' });
-          await this.fetchData();
-        },
-        async fetchData() {
-          try {
-            const res = await fetch('/admin/channels');
-            const data = await res.json();
-            this.channels = data.channels || [];
-            this.stats = data.stats || this.emptyStats();
-            this.logs = data.logs || this.stats.recent || [];
-            this.lastRefresh = new Date().toLocaleTimeString();
-          } catch (e) {}
-        },
-        async saveChannel() {
-          await fetch(this.isEdit ? '/admin/channels/' + this.formCh.id : '/admin/channels', {
-            method: this.isEdit ? 'PUT' : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(this.formCh)
-          });
-          this.showForm = false;
-          await this.fetchData();
-        },
-        async deleteChannel(id) {
-          if (confirm('确定删除这个渠道吗？')) {
-            await fetch('/admin/channels/' + id, { method: 'DELETE' });
-            await this.fetchData();
-          }
-        },
-        async testChannel(id) {
-          await fetch('/admin/test/' + id, { method: 'POST' });
-          await this.fetchData();
-        },
-        async testUnsaved() {
-          this.testStatus = '测试中...';
-          try {
-            const res = await fetch('/admin/test_unsaved', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(this.formCh)
-            });
-            const r = await res.json();
-            this.testStatus = r.msg || '测试完成';
-          } catch (e) {
-            this.testStatus = '连接失败';
-          }
-        },
-        async fetchFailover() {
-          try {
-            const res = await fetch('/admin/failover');
-            this.failover = await res.json();
-          } catch (e) {}
-        },
-        async saveFailover() {
-          this.failoverSaveStatus = '保存中...';
-          try {
-            const res = await fetch('/admin/failover', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(this.failover)
-            });
-            this.failover = await res.json();
-            this.failoverSaveStatus = '已保存';
-          } catch (e) {
-            this.failoverSaveStatus = '保存失败';
-          }
-        }
-      };
-    }
+    function app(){return{dark:localStorage.obp_theme==='dark',copied:false,lastRefresh:'-',channels:[],stats:{total:{}},router:{},pricing:{},logs:[],showForm:false,isEdit:false,form:{},keywordText:'',routerSaving:false,base:location.pathname.startsWith('/obp')?'/obp':'',
+      get apiUrl(){return location.origin + this.base + '/v1'},
+      get today(){const k=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Shanghai'});return this.stats.by_day?.[k]||{}},
+      get month(){const k=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Shanghai'}).slice(0,7);return this.stats.by_month?.[k]||{}},
+      get successRate(){const t=this.stats.total?.requests||0;return t?Math.round((this.stats.total.success||0)*1000/t)/10+'%':'-'},
+      get budgetPct(){const hard=Number(this.router.monthly_hard_limit_rmb||0);return hard?Math.min(100,Math.round((Number(this.month.cost_cny||0)/hard)*100)):0},
+      init(){this.refresh();setInterval(()=>this.refresh(),5000)},
+      async refresh(){try{const r=await fetch(this.base + '/admin/channels',{cache:'no-store'});const d=await r.json();this.channels=d.channels||[];this.stats=d.stats||{total:{}};this.router=d.router||{};this.pricing=d.pricing||{};this.logs=d.logs||[];this.keywordText=(this.router.pro_keywords||[]).join('，');this.lastRefresh=new Date().toLocaleTimeString()}catch(e){this.lastRefresh='读取失败'}},
+      async saveRouter(){this.routerSaving=true;this.router.pro_keywords=this.splitList(this.keywordText);await fetch(this.base + '/admin/router',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.router)});this.routerSaving=false;await this.refresh()},
+      splitList(s){return String(s||'').split(/[，,;；\n]+/).map(x=>x.trim()).filter(Boolean)},
+      fmt(v){return new Intl.NumberFormat('zh-CN').format(Math.round(Number(v||0)))},
+      money(v){return '¥'+Number(v||0).toFixed(4)},
+      bucketList(map){return Object.entries(map||{}).map(([name,b])=>({name,...b})).sort((a,b)=>(b.cost_cny||0)-(a.cost_cny||0)||((b.requests||0)-(a.requests||0))).slice(0,8)},
+      copy(t){navigator.clipboard.writeText(t);this.copied=true;setTimeout(()=>this.copied=false,1200)},
+      openAdd(){this.isEdit=false;this.form={name:'',type:'openai',key:'',base:'https://api.deepseek.com',models:'*',model_mapping:'',role:'default',priority:100,cost_model:''};this.showForm=true},
+      openEdit(ch){this.isEdit=true;this.form=JSON.parse(JSON.stringify(ch));this.showForm=true},
+      async saveChannel(){await fetch(this.isEdit?this.base + '/admin/channels/'+this.form.id:this.base + '/admin/channels',{method:this.isEdit?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.form)});this.showForm=false;await this.refresh()},
+      async deleteChannel(id){if(!confirm('确定删除这个渠道吗？'))return;await fetch(this.base + '/admin/channels/'+id,{method:'DELETE'});await this.refresh()}
+    }}
   </script>
 </body>
 </html>
-"""
