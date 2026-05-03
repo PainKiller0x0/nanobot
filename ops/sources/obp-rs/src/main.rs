@@ -15,6 +15,7 @@ use axum::{
 };
 use reqwest::Client;
 use std::sync::Arc;
+use std::time::Instant;
 use std::{env, net::SocketAddr};
 use tokio::sync::Mutex;
 
@@ -51,6 +52,7 @@ async fn main() {
         .route("/", get(dashboard))
         .route("/v1/chat/completions", post(handle_proxy))
         .route("/admin/channels", get(get_channels).post(add_channel))
+        .route("/admin/channels/test", post(test_channel))
         .route("/admin/stats", get(get_stats).delete(clear_stats))
         .route("/admin/router", get(get_router).put(update_router))
         .route(
@@ -143,6 +145,39 @@ async fn add_channel(
     Json(ch)
 }
 
+async fn test_channel(
+    State(state): State<Arc<ProxyState>>,
+    Json(mut ch): Json<Channel>,
+) -> Json<serde_json::Value> {
+    if ch.key.trim().is_empty() || ch.key.trim() == "***" {
+        if let Some(id) = ch.id {
+            let channels = state.channels.lock().await;
+            if let Some(saved) = channels.iter().find(|item| item.id == Some(id)) {
+                ch.key = saved.key.clone();
+            }
+        }
+    }
+
+    let result = test_channel_once(&state.client, &ch).await;
+    if let Some(id) = ch.id {
+        let mut channels = state.channels.lock().await;
+        if let Some(saved) = channels.iter_mut().find(|item| item.id == Some(id)) {
+            let label = if result
+                .get("ok")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                "ok"
+            } else {
+                "failed"
+            };
+            saved.last_test = Some(format!("{}: {}", now_label(), label));
+            save_config(&state.config_path, &channels);
+        }
+    }
+    Json(result)
+}
+
 async fn update_channel(
     State(state): State<Arc<ProxyState>>,
     Path(id): Path<u64>,
@@ -169,4 +204,159 @@ async fn delete_channel(
     channels.retain(|c| c.id != Some(id));
     save_config(&state.config_path, &channels);
     Json(serde_json::json!({ "status": "ok" }))
+}
+
+async fn test_channel_once(client: &Client, ch: &Channel) -> serde_json::Value {
+    let started = Instant::now();
+    if ch.base.trim().is_empty() {
+        return test_result(false, 0, "Base URL 不能为空", started);
+    }
+    if ch.key.trim().is_empty() || ch.key.trim() == "***" {
+        return test_result(
+            false,
+            0,
+            "API Key 不能为空；编辑已保存渠道时可以保留 ***",
+            started,
+        );
+    }
+
+    match ch.r#type.trim().to_lowercase().as_str() {
+        "anthropic" => test_anthropic_channel(client, ch, started).await,
+        "other" => test_other_channel(client, ch, started).await,
+        _ => test_openai_channel(client, ch, started).await,
+    }
+}
+
+async fn test_openai_channel(client: &Client, ch: &Channel, started: Instant) -> serde_json::Value {
+    let model = ch.mapped_model("gpt-4o-mini", "gpt-4o-mini");
+    let url = openai_chat_url(&ch.base);
+    let res = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", ch.key))
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": [{"role":"user","content":"ping"}],
+            "max_tokens": 16,
+            "stream": false
+        }))
+        .send()
+        .await;
+    response_to_test_result(res, started, model, url).await
+}
+
+async fn test_anthropic_channel(
+    client: &Client,
+    ch: &Channel,
+    started: Instant,
+) -> serde_json::Value {
+    let model =
+        first_configured_model(&ch.models).unwrap_or_else(|| "claude-3-5-haiku-latest".to_string());
+    let url = anthropic_messages_url(&ch.base);
+    let res = client
+        .post(&url)
+        .header("x-api-key", &ch.key)
+        .header("anthropic-version", "2023-06-01")
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": [{"role":"user","content":"ping"}],
+            "max_tokens": 16
+        }))
+        .send()
+        .await;
+    response_to_test_result(res, started, model, url).await
+}
+
+async fn test_other_channel(client: &Client, ch: &Channel, started: Instant) -> serde_json::Value {
+    let url = ch.base.trim_end_matches('/').to_string();
+    let res = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", ch.key))
+        .header("x-api-key", &ch.key)
+        .send()
+        .await;
+    response_to_test_result(res, started, "connectivity".to_string(), url).await
+}
+
+async fn response_to_test_result(
+    res: Result<reqwest::Response, reqwest::Error>,
+    started: Instant,
+    model: String,
+    url: String,
+) -> serde_json::Value {
+    match res {
+        Ok(response) => {
+            let status = response.status().as_u16();
+            let ok = (200..400).contains(&status);
+            let body = response.text().await.unwrap_or_default();
+            let mut value = test_result(
+                ok,
+                status,
+                &format!(
+                    "{}；模型 {}；{}",
+                    if ok { "测试通过" } else { "测试失败" },
+                    model,
+                    trim_for_display(&body)
+                ),
+                started,
+            );
+            if let Some(map) = value.as_object_mut() {
+                map.insert("model".to_string(), serde_json::Value::String(model));
+                map.insert("url".to_string(), serde_json::Value::String(url));
+            }
+            value
+        }
+        Err(err) => test_result(false, 0, &format!("请求失败：{}", err), started),
+    }
+}
+
+fn test_result(ok: bool, status: u16, message: &str, started: Instant) -> serde_json::Value {
+    serde_json::json!({
+        "ok": ok,
+        "status": status,
+        "latency_ms": started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        "message": message,
+    })
+}
+
+fn trim_for_display(text: &str) -> String {
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    compact.chars().take(180).collect()
+}
+
+fn first_configured_model(models: &str) -> Option<String> {
+    models
+        .split(',')
+        .map(str::trim)
+        .find(|item| !item.is_empty() && *item != "*")
+        .map(ToString::to_string)
+}
+
+fn openai_chat_url(base: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if base.ends_with("/chat/completions") {
+        base.to_string()
+    } else if base.ends_with("/v1") {
+        format!("{}/chat/completions", base)
+    } else {
+        format!("{}/v1/chat/completions", base)
+    }
+}
+
+fn anthropic_messages_url(base: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if base.ends_with("/messages") {
+        base.to_string()
+    } else if base.ends_with("/v1") {
+        format!("{}/messages", base)
+    } else {
+        format!("{}/v1/messages", base)
+    }
+}
+
+fn now_label() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|item| item.as_secs())
+        .unwrap_or_default();
+    secs.to_string()
 }

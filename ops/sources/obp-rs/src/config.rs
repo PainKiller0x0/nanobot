@@ -19,6 +19,7 @@ pub struct Channel {
     pub last_test: Option<String>,
     pub fail_count: u32,
     pub role: String,
+    pub group: String,
     pub priority: u32,
     pub cost_model: String,
 }
@@ -38,6 +39,7 @@ impl Default for Channel {
             last_test: None,
             fail_count: 0,
             role: "default".to_string(),
+            group: String::new(),
             priority: 100,
             cost_model: String::new(),
         }
@@ -56,6 +58,10 @@ impl Channel {
         } else {
             role.to_lowercase()
         }
+    }
+
+    pub fn group_key(&self) -> String {
+        self.group.trim().to_lowercase()
     }
 
     pub fn supports_model(&self, model: &str) -> bool {
@@ -131,6 +137,10 @@ pub struct RouterConfig {
     pub pro_model: String,
     pub emergency_model: String,
     pub backup_model: String,
+    pub default_group: String,
+    pub pro_group: String,
+    pub emergency_group: String,
+    pub backup_group: String,
     pub pro_prompt_chars: usize,
     pub pro_message_count: usize,
     pub monthly_warn_rmb: f64,
@@ -149,6 +159,10 @@ impl Default for RouterConfig {
             pro_model: "deepseek-v4-pro".to_string(),
             emergency_model: "LongCat-Flash-Chat".to_string(),
             backup_model: "coding-plan".to_string(),
+            default_group: "deepseek".to_string(),
+            pro_group: "deepseek".to_string(),
+            emergency_group: "longcat".to_string(),
+            backup_group: String::new(),
             pro_prompt_chars: 18_000,
             pro_message_count: 14,
             monthly_warn_rmb: 10.0,

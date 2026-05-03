@@ -30,6 +30,7 @@ struct RouteDecision {
     requested_model: String,
     desired_model: String,
     role: String,
+    group: String,
     reason: String,
 }
 
@@ -38,6 +39,7 @@ struct Attempt {
     channel: Channel,
     actual_model: String,
     role: String,
+    group: String,
     reason: String,
 }
 
@@ -241,6 +243,7 @@ fn route_decision(
             requested_model: requested_model.to_string(),
             desired_model: requested_model.to_string(),
             role: "any".to_string(),
+            group: String::new(),
             reason: "router disabled".to_string(),
         };
     }
@@ -251,6 +254,7 @@ fn route_decision(
             requested_model: requested_model.to_string(),
             desired_model: router.emergency_model.clone(),
             role: "emergency".to_string(),
+            group: group_for_role(router, "emergency"),
             reason: format!("monthly hard limit reached {:.2} CNY", monthly_cost),
         };
         if router.dry_run {
@@ -260,6 +264,7 @@ fn route_decision(
             );
             decision.desired_model = requested_model.to_string();
             decision.role = "any".to_string();
+            decision.group.clear();
         }
         return decision;
     }
@@ -317,6 +322,7 @@ fn route_decision(
                 requested_model: requested_model.to_string(),
                 desired_model: router.default_model.clone(),
                 role: "default".to_string(),
+                group: group_for_role(router, "default"),
                 reason: format!(
                     "monthly downgrade threshold reached {:.2} CNY",
                     monthly_cost
@@ -327,6 +333,7 @@ fn route_decision(
                 requested_model: requested_model.to_string(),
                 desired_model: router.pro_model.clone(),
                 role: "pro".to_string(),
+                group: group_for_role(router, "pro"),
                 reason,
             }
         } else {
@@ -334,6 +341,7 @@ fn route_decision(
                 requested_model: requested_model.to_string(),
                 desired_model: router.default_model.clone(),
                 role: "default".to_string(),
+                group: group_for_role(router, "default"),
                 reason,
             }
         };
@@ -345,9 +353,29 @@ fn route_decision(
         );
         decision.desired_model = requested_model.to_string();
         decision.role = "any".to_string();
+        decision.group.clear();
     }
 
     decision
+}
+
+fn group_for_role(router: &RouterConfig, role: &str) -> String {
+    match role {
+        "default" => router.default_group.trim(),
+        "pro" => router.pro_group.trim(),
+        "emergency" => router.emergency_group.trim(),
+        "backup" => router.backup_group.trim(),
+        _ => "",
+    }
+    .to_lowercase()
+}
+
+#[derive(Debug, Clone)]
+struct AttemptSpec {
+    role: String,
+    group: String,
+    desired_model: String,
+    fallback: bool,
 }
 
 async fn build_attempts(
@@ -356,40 +384,71 @@ async fn build_attempts(
     router: &RouterConfig,
     decision: &RouteDecision,
 ) -> Vec<Attempt> {
-    let mut roles = vec![decision.role.clone()];
+    let mut specs = Vec::new();
+    add_attempt_spec(
+        &mut specs,
+        decision.role.clone(),
+        decision.group.clone(),
+        decision.desired_model.clone(),
+        false,
+    );
     for role in ["default", "pro", "emergency", "backup", "any"] {
-        if !roles.iter().any(|item| item == role) {
-            roles.push(role.to_string());
-        }
-    }
-    let mut attempts = Vec::new();
-    for role in roles {
-        let desired = match role.as_str() {
+        let desired = match role {
             "pro" => router.pro_model.as_str(),
             "emergency" => router.emergency_model.as_str(),
             "backup" => router.backup_model.as_str(),
             "default" => router.default_model.as_str(),
             _ => decision.desired_model.as_str(),
         };
+        let group = group_for_role(router, role);
+        add_attempt_spec(
+            &mut specs,
+            role.to_string(),
+            group.clone(),
+            desired.to_string(),
+            true,
+        );
+        if !group.is_empty() {
+            add_attempt_spec(
+                &mut specs,
+                role.to_string(),
+                String::new(),
+                desired.to_string(),
+                true,
+            );
+        }
+    }
+    let mut attempts = Vec::new();
+    for spec in specs {
         let mut candidates: Vec<Channel> = channels
             .iter()
             .filter(|ch| ch.is_active())
-            .filter(|ch| role == "any" || ch.role_key() == role)
-            .filter(|ch| ch.supports_model(desired) || ch.supports_model(&decision.requested_model))
+            .filter(|ch| spec.role == "any" || ch.role_key() == spec.role)
+            .filter(|ch| spec.group.is_empty() || ch.group_key() == spec.group)
+            .filter(|ch| {
+                ch.supports_model(&spec.desired_model)
+                    || ch.supports_model(&decision.requested_model)
+            })
             .cloned()
             .collect();
-        candidates.sort_by_key(|ch| (ch.priority, ch.name.clone()));
+        candidates.sort_by_key(|ch| (ch.priority, ch.group_key(), ch.name.clone()));
         rotate_candidates(state, &mut candidates).await;
         for ch in candidates {
-            let actual = ch.mapped_model(&decision.requested_model, desired);
+            let actual = ch.mapped_model(&decision.requested_model, &spec.desired_model);
             let attempt = Attempt {
                 channel: ch,
                 actual_model: actual,
-                role: role.clone(),
-                reason: if role == decision.role {
+                role: spec.role.clone(),
+                group: spec.group.clone(),
+                reason: if !spec.fallback
+                    && spec.role == decision.role
+                    && spec.group == decision.group
+                {
                     decision.reason.clone()
+                } else if spec.group.is_empty() {
+                    format!("fallback to {}", spec.role)
                 } else {
-                    format!("fallback to {}", role)
+                    format!("fallback to {}/{}", spec.role, spec.group)
                 },
             };
             if !attempts.iter().any(|existing: &Attempt| {
@@ -401,6 +460,27 @@ async fn build_attempts(
         }
     }
     attempts
+}
+
+fn add_attempt_spec(
+    specs: &mut Vec<AttemptSpec>,
+    role: String,
+    group: String,
+    desired_model: String,
+    fallback: bool,
+) {
+    if specs
+        .iter()
+        .any(|item| item.role == role && item.group == group && item.desired_model == desired_model)
+    {
+        return;
+    }
+    specs.push(AttemptSpec {
+        role,
+        group,
+        desired_model,
+        fallback,
+    });
 }
 
 async fn rotate_candidates(state: &Arc<ProxyState>, candidates: &mut [Channel]) {
@@ -455,6 +535,7 @@ fn route_headers(
 ) -> axum::http::response::Builder {
     let headers = [
         ("x-obp-route", attempt.role.as_str()),
+        ("x-obp-group", attempt.group.as_str()),
         ("x-obp-requested-model", decision.requested_model.as_str()),
         ("x-obp-actual-model", attempt.actual_model.as_str()),
         ("x-obp-channel", attempt.channel.name.as_str()),

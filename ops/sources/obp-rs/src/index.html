@@ -8,35 +8,28 @@
   <script>tailwind.config={darkMode:'class'}</script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
-    [x-cloak]{display:none!important}
-    .mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
-    .panel{background:rgba(255,255,255,.88);border:1px solid rgb(231 229 228);border-radius:1.5rem;box-shadow:0 18px 50px rgba(68,64,60,.08)}
-    .dark .panel{background:rgba(15,23,42,.88);border-color:rgb(30 41 59)}
-    .card{background:white;border:1px solid rgb(231 229 228);border-radius:1rem;padding:.95rem}
-    .dark .card,.dark .subcard{background:rgb(15 23 42);border-color:rgb(30 41 59)}
-    .subcard{background:rgb(250 250 249);border:1px solid rgb(231 229 228);border-radius:.9rem;padding:.75rem}
-    .k{font-size:.75rem;color:rgb(100 116 139)}
-    .v{font-size:1.55rem;font-weight:900;letter-spacing:-.04em}
-    .input{width:100%;border:1px solid rgb(203 213 225);border-radius:.85rem;padding:.58rem .72rem;background:white;outline:none}
-    .input:focus{border-color:rgb(13 148 136);box-shadow:0 0 0 3px rgba(20,184,166,.15)}
-    .dark .input{background:rgb(2 6 23);border-color:rgb(51 65 85)}
-    .field{display:block}.field span{display:block;margin:0 0 .35rem .15rem;font-size:.78rem;font-weight:800;color:rgb(100 116 139)}
-    .th{text-align:left;padding:.78rem 1rem;font-weight:800;white-space:nowrap}.td{padding:.9rem 1rem;vertical-align:top}
-    .badge{display:inline-flex;align-items:center;border-radius:.7rem;padding:.2rem .55rem;background:rgb(241 245 249);font-size:.75rem;font-weight:900}
-    .badge.ok{background:rgb(220 252 231);color:rgb(22 101 52)}.badge.bad{background:rgb(254 226 226);color:rgb(190 18 60)}
-    .dark .badge{background:rgb(30 41 59)}.dark .badge.ok{background:rgba(16,185,129,.18);color:rgb(110 231 183)}.dark .badge.bad{background:rgba(244,63,94,.16);color:rgb(251 113 133)}
-    .btn{display:inline-flex;align-items:center;border:1px solid rgb(203 213 225);border-radius:.75rem;padding:.4rem .7rem;font-size:.78rem;font-weight:800}.dark .btn{border-color:rgb(51 65 85)}
-    .btn.danger{color:rgb(225 29 72);border-color:rgb(253 164 175)}.line{display:flex;justify-content:space-between;gap:.75rem;border-bottom:1px solid rgb(231 229 228);padding:.58rem 0;font-size:.84rem}.dark .line{border-color:rgb(30 41 59)}
+    [x-cloak]{display:none!important}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+    .panel{background:rgba(255,255,255,.9);border:1px solid rgb(231 229 228);border-radius:1.5rem;box-shadow:0 18px 50px rgba(68,64,60,.08)}
+    .dark .panel{background:rgba(15,23,42,.9);border-color:rgb(30 41 59)}
+    .card{background:white;border:1px solid rgb(231 229 228);border-radius:1rem;padding:.95rem}.dark .card,.dark .subcard{background:rgb(15 23 42);border-color:rgb(30 41 59)}
+    .subcard{background:rgb(250 250 249);border:1px solid rgb(231 229 228);border-radius:.9rem;padding:.75rem}.k{font-size:.75rem;color:rgb(100 116 139)}.v{font-size:1.55rem;font-weight:900;letter-spacing:-.04em}
+    .input{width:100%;border:1px solid rgb(203 213 225);border-radius:.85rem;padding:.58rem .72rem;background:white;outline:none}.input:focus{border-color:rgb(13 148 136);box-shadow:0 0 0 3px rgba(20,184,166,.15)}.dark .input{background:rgb(2 6 23);border-color:rgb(51 65 85)}
+    .field{display:block}.field-label{display:flex;align-items:center;gap:.35rem;margin:0 0 .35rem .15rem;font-size:.78rem;font-weight:900;color:rgb(100 116 139)}
+    .q{display:inline-flex;align-items:center;justify-content:center;width:1rem;height:1rem;border-radius:999px;background:rgb(226 232 240);color:rgb(51 65 85);font-size:.7rem;font-weight:900}.dark .q{background:rgb(51 65 85);color:rgb(226 232 240)}
+    .th{text-align:left;padding:.78rem 1rem;font-weight:900;white-space:nowrap}.td{padding:.9rem 1rem;vertical-align:top}.badge{display:inline-flex;align-items:center;border-radius:.7rem;padding:.2rem .55rem;background:rgb(241 245 249);font-size:.75rem;font-weight:900}.badge.ok{background:rgb(220 252 231);color:rgb(22 101 52)}.badge.bad{background:rgb(254 226 226);color:rgb(190 18 60)}.dark .badge{background:rgb(30 41 59)}.dark .badge.ok{background:rgba(16,185,129,.18);color:rgb(110 231 183)}.dark .badge.bad{background:rgba(244,63,94,.16);color:rgb(251 113 133)}
+    .btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid rgb(203 213 225);border-radius:.75rem;padding:.4rem .7rem;font-size:.78rem;font-weight:900}.dark .btn{border-color:rgb(51 65 85)}.btn.danger{color:rgb(225 29 72);border-color:rgb(253 164 175)}.line{display:flex;justify-content:space-between;gap:.75rem;border-bottom:1px solid rgb(231 229 228);padding:.58rem 0;font-size:.84rem}.dark .line{border-color:rgb(30 41 59)}
   </style>
 </head>
 <body x-cloak class="min-h-screen bg-[radial-gradient(circle_at_top_left,#d9f99d33,transparent_32%),linear-gradient(135deg,#f5f5f4,#ecfeff)] dark:bg-[radial-gradient(circle_at_top_left,#064e3b55,transparent_32%),linear-gradient(135deg,#020617,#0f172a)] text-slate-900 dark:text-slate-100">
   <div class="max-w-7xl mx-auto p-4 md:p-7" x-init="init()">
+    <div x-show="notice" class="fixed top-4 left-1/2 -translate-x-1/2 z-[70] rounded-2xl bg-slate-950 text-white dark:bg-white dark:text-slate-950 px-4 py-2 text-sm font-bold shadow-xl" x-text="notice"></div>
+
     <header class="mb-5 panel p-5">
       <div class="flex flex-wrap justify-between gap-4">
         <div>
           <div class="text-xs font-black tracking-[.22em] text-teal-700 dark:text-teal-300">MODEL ROUTER</div>
           <h1 class="text-3xl md:text-4xl font-black tracking-tight mt-1">OBP 智能模型网关</h1>
-          <p class="text-sm text-slate-500 dark:text-slate-400 mt-2">默认走 Flash 省钱，复杂任务升级 Pro，异常时回落 LongCat/保底模型；每次调用都记录路由和成本。</p>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mt-2">默认走 Flash 省钱，复杂任务升级 Pro，异常时回落 LongCat/保底模型；渠道可以按组做轮询均衡。</p>
         </div>
         <div class="flex flex-wrap items-start gap-2">
           <button @click="refresh()" class="px-3 py-2 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-sm font-bold">刷新</button>
@@ -46,8 +39,9 @@
       </div>
       <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
         <span class="text-slate-500">API 入口</span>
-        <button @click="copy(apiUrl)" class="mono px-3 py-1.5 rounded-lg border border-stone-300 dark:border-slate-700 bg-stone-50 dark:bg-slate-950" x-text="copied?'已复制':apiUrl"></button>
-        <span class="text-slate-400" x-text="'刷新：' + lastRefresh"></span>
+        <code class="mono px-3 py-1.5 rounded-lg border border-stone-300 dark:border-slate-700 bg-stone-50 dark:bg-slate-950" x-text="apiUrl"></code>
+        <button @click="copy(apiUrl)" class="btn">复制</button>
+        <span :class="loadError?'text-rose-500':'text-slate-400'" x-text="loadError || ('刷新：' + lastRefresh)"></span>
       </div>
     </header>
 
@@ -63,45 +57,49 @@
         <section class="panel p-4">
           <div class="flex flex-wrap justify-between gap-3 mb-3">
             <div>
-              <h2 class="font-black text-lg">智能路由</h2>
-              <p class="text-xs text-slate-500 mt-1">根据关键词、上下文长度、消息数量、月度预算和上游状态选择模型。Dry-run 会记录“本来会怎么切”，但不真正改模型。</p>
+              <h2 class="font-black text-lg">模型路由</h2>
+              <p class="text-xs text-slate-500 mt-1">模型名决定请求的目标模型；组名决定优先使用哪一组渠道。同组多个渠道会自动轮询，类似 One Key Balance。</p>
             </div>
             <button @click="saveRouter()" class="px-3 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-sm font-bold" x-text="routerSaving?'保存中':'保存路由配置'"></button>
           </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <label class="flex items-center gap-2"><input type="checkbox" x-model="router.enabled">启用智能路由</label>
             <label class="flex items-center gap-2"><input type="checkbox" x-model="router.dry_run">Dry-run 只记录不切换</label>
-            <label class="field"><span>默认模型</span><input x-model="router.default_model" class="input mono"></label>
-            <label class="field"><span>高级模型</span><input x-model="router.pro_model" class="input mono"></label>
-            <label class="field"><span>应急模型</span><input x-model="router.emergency_model" class="input mono"></label>
-            <label class="field"><span>保底模型</span><input x-model="router.backup_model" class="input mono"></label>
-            <label class="field"><span>升级 Pro 字符数</span><input x-model.number="router.pro_prompt_chars" type="number" class="input"></label>
-            <label class="field"><span>升级 Pro 消息数</span><input x-model.number="router.pro_message_count" type="number" class="input"></label>
-            <label class="field"><span>月度提醒 / 元</span><input x-model.number="router.monthly_warn_rmb" type="number" step="0.1" class="input"></label>
-            <label class="field"><span>月度降级 / 元</span><input x-model.number="router.monthly_downgrade_rmb" type="number" step="0.1" class="input"></label>
-            <label class="field"><span>月度熔断 / 元</span><input x-model.number="router.monthly_hard_limit_rmb" type="number" step="0.1" class="input"></label>
-            <label class="field"><span>Pro 关键词</span><input x-model="keywordText" @change="router.pro_keywords=splitList(keywordText)" class="input"></label>
+            <label class="field"><span class="field-label">默认模型 <button class="q" @click.prevent="help('普通闲聊和轻任务优先使用的模型名，比如 deepseek-v4-flash。')">?</button></span><input x-model="router.default_model" class="input mono"></label>
+            <label class="field"><span class="field-label">默认组 <button class="q" @click.prevent="help('默认模型优先走的渠道组。同组多个渠道会轮询均衡，推荐 deepseek。')">?</button></span><input x-model="router.default_group" class="input mono" placeholder="deepseek"></label>
+            <label class="field"><span class="field-label">高级模型 <button class="q" @click.prevent="help('复杂任务、长上下文、命中 Pro 关键词时使用的模型，比如 deepseek-v4-pro。')">?</button></span><input x-model="router.pro_model" class="input mono"></label>
+            <label class="field"><span class="field-label">高级组 <button class="q" @click.prevent="help('高级模型优先走的渠道组，可以和默认组相同，也可以单独建 pro 池。')">?</button></span><input x-model="router.pro_group" class="input mono" placeholder="deepseek"></label>
+            <label class="field"><span class="field-label">应急模型 <button class="q" @click.prevent="help('预算熔断或上游失败时兜底用的模型，目前建议 LongCat-Flash-Chat。')">?</button></span><input x-model="router.emergency_model" class="input mono"></label>
+            <label class="field"><span class="field-label">应急组 <button class="q" @click.prevent="help('应急模型优先走的渠道组；现有 LongCat 渠道已放在 longcat 组。')">?</button></span><input x-model="router.emergency_group" class="input mono" placeholder="longcat"></label>
+            <label class="field"><span class="field-label">保底模型 <button class="q" @click.prevent="help('所有主要渠道都失败后才尝试的最后一层兜底模型。')">?</button></span><input x-model="router.backup_model" class="input mono"></label>
+            <label class="field"><span class="field-label">保底组 <button class="q" @click.prevent="help('保底模型对应的渠道组；没有单独保底渠道时可以留空。')">?</button></span><input x-model="router.backup_group" class="input mono"></label>
+            <label class="field"><span class="field-label">升级 Pro 字符数 <button class="q" @click.prevent="help('单次请求文本长度超过这个阈值，就认为任务偏重，自动走高级模型。')">?</button></span><input x-model.number="router.pro_prompt_chars" type="number" class="input"></label>
+            <label class="field"><span class="field-label">升级 Pro 消息数 <button class="q" @click.prevent="help('上下文消息数量超过这个阈值，也会自动走高级模型。')">?</button></span><input x-model.number="router.pro_message_count" type="number" class="input"></label>
+            <label class="field"><span class="field-label">月预算提醒（元） <button class="q" @click.prevent="help('本月累计成本超过这个值时，看板会提醒；它本身不改变模型。')">?</button></span><input x-model.number="router.monthly_warn_rmb" type="number" step="0.1" class="input"></label>
+            <label class="field"><span class="field-label">月预算降级（元） <button class="q" @click.prevent="help('本月累计成本超过这个值后，不再自动升 Pro，优先走默认模型/默认组。')">?</button></span><input x-model.number="router.monthly_downgrade_rmb" type="number" step="0.1" class="input"></label>
+            <label class="field"><span class="field-label">月预算熔断（元） <button class="q" @click.prevent="help('本月累计成本超过这个值后，强制走应急模型/应急组，防止费用失控。')">?</button></span><input x-model.number="router.monthly_hard_limit_rmb" type="number" step="0.1" class="input"></label>
+            <label class="field md:col-span-2"><span class="field-label">Pro 关键词 <button class="q" @click.prevent="help('请求里出现这些词时，自动认为任务更复杂并升级高级模型。默认：' + defaultKeywords.join('、'))">?</button></span><input x-model="keywordText" @change="router.pro_keywords=splitList(keywordText)" class="input" :placeholder="defaultKeywords.join('，')"><div class="mt-2 flex flex-wrap gap-1"><template x-for="kw in splitList(keywordText)" :key="kw"><span class="badge" x-text="kw"></span></template></div></label>
           </div>
         </section>
 
         <section class="panel overflow-hidden">
           <div class="p-4 border-b border-stone-200 dark:border-slate-800 flex justify-between gap-3">
-            <h2 class="font-black text-lg">渠道</h2>
-            <div class="text-xs text-slate-500">角色：default / pro / emergency / backup</div>
+            <div><h2 class="font-black text-lg">渠道池</h2><p class="text-xs text-slate-500 mt-1">同一个组里的多个渠道会自动轮询；如果一个渠道失败，会按路由顺序 fallback。</p></div>
+            <div class="text-xs text-slate-500" x-text="'当前组：' + groupNames.join(' / ')"></div>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead class="bg-stone-50 dark:bg-slate-950 text-slate-500">
-                <tr><th class="th">渠道</th><th class="th">角色</th><th class="th">模型</th><th class="th">状态</th><th class="th text-right">操作</th></tr>
+                <tr><th class="th">渠道</th><th class="th">角色 / 组</th><th class="th">模型</th><th class="th">状态</th><th class="th text-right">操作</th></tr>
               </thead>
               <tbody class="divide-y divide-stone-100 dark:divide-slate-800">
                 <template x-for="ch in channels" :key="ch.id">
                   <tr class="hover:bg-stone-50 dark:hover:bg-slate-950/60">
-                    <td class="td"><div class="font-bold" x-text="ch.name"></div><div class="text-xs text-slate-500 max-w-xs truncate" x-text="ch.base"></div></td>
-                    <td class="td"><span class="badge" x-text="ch.role||'default'"></span><div class="text-xs text-slate-500 mt-1" x-text="'优先级 ' + (ch.priority||100)"></div></td>
+                    <td class="td"><div class="font-bold" x-text="ch.name"></div><div class="text-xs text-slate-500 max-w-xs truncate" x-text="ch.base"></div><div class="text-xs text-slate-400 mt-1" x-text="typeLabel(ch.type)"></div></td>
+                    <td class="td"><span class="badge" x-text="ch.role||'default'"></span><span class="badge ml-1" x-text="ch.group||'未分组'"></span><div class="text-xs text-slate-500 mt-1" x-text="'优先级 ' + (ch.priority||100)"></div></td>
                     <td class="td mono text-xs"><div x-text="ch.models||'*'"></div><div class="text-slate-500 truncate max-w-xs" x-text="ch.model_mapping||''"></div></td>
-                    <td class="td"><span :class="(ch.status==='active'||!ch.status)?'ok':'bad'" class="badge" x-text="ch.status||'active'"></span><div class="text-xs text-slate-500 mt-1" x-text="'请求 ' + (ch.requests||0) + ' / 失败 ' + (ch.fail_count||0)"></div></td>
-                    <td class="td text-right"><button @click="openEdit(ch)" class="btn mr-1">编辑</button><button @click="deleteChannel(ch.id)" class="btn danger">删除</button></td>
+                    <td class="td"><span :class="(ch.status==='active'||!ch.status)?'ok':'bad'" class="badge" x-text="ch.status||'active'"></span><div class="text-xs text-slate-500 mt-1" x-text="'请求 ' + (ch.requests||0) + ' / 失败 ' + (ch.fail_count||0)"></div><div class="text-xs text-slate-400 mt-1" x-text="ch.last_test?'测试 '+ch.last_test:''"></div></td>
+                    <td class="td text-right whitespace-nowrap"><button @click="testChannel(ch)" class="btn mr-1">测试</button><button @click="openEdit(ch)" class="btn mr-1">编辑</button><button @click="deleteChannel(ch.id)" class="btn danger">删除</button></td>
                   </tr>
                 </template>
               </tbody>
@@ -134,76 +132,64 @@
             <div class="subcard"><div class="k">缓存命中</div><div class="v" x-text="fmt(month.cached_tokens)"></div></div>
             <div class="subcard"><div class="k">未命中输入</div><div class="v" x-text="fmt(month.uncached_prompt_tokens)"></div></div>
           </div>
-          <div class="mt-4 h-3 rounded-full bg-stone-200 dark:bg-slate-800 overflow-hidden">
-            <div class="h-full bg-gradient-to-r from-emerald-500 to-amber-500" :style="'width:'+budgetPct+'%'"></div>
-          </div>
+          <div class="mt-4 h-3 rounded-full bg-stone-200 dark:bg-slate-800 overflow-hidden"><div class="h-full bg-gradient-to-r from-emerald-500 to-amber-500" :style="'width:'+budgetPct+'%'"></div></div>
           <div class="text-xs text-slate-500 mt-2" x-text="'预算进度：' + budgetPct + '% / 熔断 ' + money(router.monthly_hard_limit_rmb)"></div>
         </section>
-
-        <section class="panel p-4">
-          <h2 class="font-black text-lg mb-3">按模型</h2>
-          <template x-for="item in bucketList(stats.by_model)" :key="item.name">
-            <div class="line"><span class="truncate" x-text="item.name"></span><span class="mono" x-text="money(item.cost_cny) + ' / ' + fmt(item.requests) + '次'"></span></div>
-          </template>
-        </section>
-
-        <section class="panel p-4">
-          <h2 class="font-black text-lg mb-3">按路由</h2>
-          <template x-for="item in bucketList(stats.by_route)" :key="item.name">
-            <div class="line"><span x-text="item.name"></span><span class="mono" x-text="fmt(item.requests) + '次 / ' + money(item.cost_cny)"></span></div>
-          </template>
-        </section>
-
-        <section class="panel p-4">
-          <h2 class="font-black text-lg mb-2">价格表</h2>
-          <template x-for="[name,p] in Object.entries(pricing)" :key="name">
-            <div class="text-xs border-b border-stone-100 dark:border-slate-800 py-2">
-              <div class="font-bold mono" x-text="name"></div>
-              <div class="text-slate-500" x-text="'缓存 ' + p.cached_input + ' / 输入 ' + p.input + ' / 输出 ' + p.output + ' 元/百万 tokens'"></div>
-            </div>
-          </template>
-        </section>
+        <section class="panel p-4"><h2 class="font-black text-lg mb-3">按模型</h2><template x-for="item in bucketList(stats.by_model)" :key="item.name"><div class="line"><span class="truncate" x-text="item.name"></span><span class="mono" x-text="money(item.cost_cny) + ' / ' + fmt(item.requests) + '次'"></span></div></template></section>
+        <section class="panel p-4"><h2 class="font-black text-lg mb-3">按路由</h2><template x-for="item in bucketList(stats.by_route)" :key="item.name"><div class="line"><span x-text="item.name"></span><span class="mono" x-text="fmt(item.requests) + '次 / ' + money(item.cost_cny)"></span></div></template></section>
+        <section class="panel p-4"><h2 class="font-black text-lg mb-2">价格表</h2><template x-for="[name,p] in Object.entries(pricing)" :key="name"><div class="text-xs border-b border-stone-100 dark:border-slate-800 py-2"><div class="font-bold mono" x-text="name"></div><div class="text-slate-500" x-text="'缓存 ' + p.cached_input + ' / 输入 ' + p.input + ' / 输出 ' + p.output + ' 元/百万 tokens'"></div></div></template></section>
       </aside>
     </main>
 
-    <div x-show="showForm" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div class="w-full max-w-2xl panel p-5">
+    <div x-show="showForm" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" @keydown.escape.window="showForm=false">
+      <div class="w-full max-w-3xl panel p-5 max-h-[92vh] overflow-auto">
         <div class="flex justify-between mb-4"><h3 class="font-black" x-text="isEdit?'编辑渠道':'新增渠道'"></h3><button @click="showForm=false" class="btn">关闭</button></div>
+        <div class="mb-4 flex flex-wrap gap-2 text-xs"><span class="text-slate-500 self-center">预填模板</span><button class="btn" @click="applyPreset('longcat')">LongCat</button><button class="btn" @click="applyPreset('deepseek_flash')">DeepSeek Flash</button><button class="btn" @click="applyPreset('deepseek_pro')">DeepSeek Pro</button><button class="btn" @click="applyPreset('anthropic')">Anthropic</button><button class="btn" @click="applyPreset('openai')">OpenAI 兼容</button></div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <label class="field"><span>名称</span><input x-model="form.name" class="input"></label>
-          <label class="field"><span>类型</span><input x-model="form.type" class="input"></label>
-          <label class="field"><span>角色</span><select x-model="form.role" class="input"><option>default</option><option>pro</option><option>emergency</option><option>backup</option></select></label>
-          <label class="field"><span>优先级</span><input x-model.number="form.priority" type="number" class="input"></label>
-          <label class="field"><span>Base URL</span><input x-model="form.base" class="input mono"></label>
-          <label class="field"><span>模型范围</span><input x-model="form.models" class="input mono"></label>
-          <label class="field"><span>API Key</span><input x-model="form.key" type="password" class="input mono"></label>
-          <label class="field"><span>成本模型</span><input x-model="form.cost_model" class="input mono"></label>
-          <label class="field md:col-span-2"><span>模型映射 JSON</span><input x-model="form.model_mapping" class="input mono"></label>
+          <label class="field"><span class="field-label">名称</span><input x-model="form.name" class="input"></label>
+          <label class="field"><span class="field-label">类型 <button class="q" @click.prevent="help('OpenAI 兼容会转发 /v1/chat/completions；Anthropic 会用原生 /v1/messages 做连接测试；其他只做基础连通性测试。')">?</button></span><select x-model="form.type" class="input"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic API</option><option value="other">其他</option></select></label>
+          <label class="field"><span class="field-label">角色 <button class="q" @click.prevent="help('角色决定 fallback 顺序：default 普通、pro 高级、emergency 应急、backup 最后兜底。')">?</button></span><select x-model="form.role" class="input"><option>default</option><option>pro</option><option>emergency</option><option>backup</option></select></label>
+          <label class="field"><span class="field-label">组 <button class="q" @click.prevent="help('同组多个渠道会轮询均衡。比如 3 个 LongCat 渠道都填 longcat，就会形成一个 LongCat 池。')">?</button></span><input x-model="form.group" class="input mono" placeholder="longcat / deepseek / pro-pool"></label>
+          <label class="field"><span class="field-label">优先级 <button class="q" @click.prevent="help('数字越小越优先；同优先级会按组内轮询。')">?</button></span><input x-model.number="form.priority" type="number" class="input"></label>
+          <label class="field"><span class="field-label">Base URL <button class="q" @click.prevent="help('供应商 API 根地址。OpenAI 兼容可以填到域名或 /v1，OBP 会自动拼 /chat/completions。')">?</button></span><input x-model="form.base" class="input mono"></label>
+          <label class="field md:col-span-2"><span class="field-label">API Key</span><input x-model="form.key" type="password" class="input mono" placeholder="编辑已有渠道时保留 *** 即可不改 key"></label>
+          <label class="field"><span class="field-label">模型范围 <button class="q" @click.prevent="help('这个渠道能跑哪些模型，逗号分隔；填 * 表示都接受。建议明确写模型名，避免路由误打。')">?</button></span><input x-model="form.models" class="input mono" placeholder="deepseek-v4-flash, deepseek-v4-pro"></label>
+          <label class="field"><span class="field-label">成本模型 <button class="q" @click.prevent="help('成本估算的价格模板名称；留空时按实际模型名猜。比如 deepseek-v4-flash、deepseek-v4-pro-discount、longcat。')">?</button></span><input x-model="form.cost_model" class="input mono" placeholder="deepseek-v4-flash / longcat"></label>
+          <label class="field md:col-span-2"><span class="field-label">模型映射 JSON <button class="q" @click.prevent="help('把客户端请求的模型名改写成上游真实模型名。例：请求 gpt-4o-mini 时，LongCat 实际用 LongCat-Flash-Chat。')">?</button></span><textarea x-model="form.model_mapping" rows="5" class="input mono" placeholder='{"gpt-4o-mini":"LongCat-Flash-Chat"}'></textarea></label>
         </div>
-        <div class="flex justify-end gap-2 mt-5"><button @click="showForm=false" class="btn">取消</button><button @click="saveChannel()" class="px-4 py-2 rounded-xl bg-teal-700 text-white font-bold">保存</button></div>
+        <div x-show="testResult" class="mt-4 rounded-xl border p-3 text-sm" :class="testResult?.ok?'border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200':'border-rose-300 bg-rose-50 text-rose-800 dark:bg-rose-950/30 dark:text-rose-200'"><div class="font-black" x-text="testResult?.ok?'测试通过':'测试失败'"></div><div class="mt-1" x-text="testResult?.message"></div><div class="mono text-xs mt-1" x-text="'HTTP ' + (testResult?.status||0) + ' / ' + (testResult?.latency_ms||0) + 'ms'"></div></div>
+        <div class="flex justify-end gap-2 mt-5"><button @click="testChannel(form)" class="btn" x-text="testing?'测试中':'测试连接'"></button><button @click="showForm=false" class="btn">取消</button><button @click="saveChannel()" class="px-4 py-2 rounded-xl bg-teal-700 text-white font-bold">保存</button></div>
       </div>
     </div>
   </div>
 
   <script>
-    function app(){return{dark:localStorage.obp_theme==='dark',copied:false,lastRefresh:'-',channels:[],stats:{total:{}},router:{},pricing:{},logs:[],showForm:false,isEdit:false,form:{},keywordText:'',routerSaving:false,base:location.pathname.startsWith('/obp')?'/obp':'',
+    function detectBase(){const parts=location.pathname.split('/').filter(Boolean);const idx=parts.indexOf('obp');return idx>=0?'/'+parts.slice(0,idx+1).join('/'):''}
+    function app(){return{dark:localStorage.obp_theme==='dark',notice:'',loadError:'',copied:false,lastRefresh:'-',channels:[],stats:{total:{}},router:{},pricing:{},logs:[],showForm:false,isEdit:false,form:{},keywordText:'',routerSaving:false,testing:false,testResult:null,base:detectBase(),defaultKeywords:['深度','架构','review','重构','复杂','取舍','方案','设计','迁移','推理','长文','全盘'],
       get apiUrl(){return location.origin + this.base + '/v1'},
       get today(){const k=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Shanghai'});return this.stats.by_day?.[k]||{}},
       get month(){const k=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Shanghai'}).slice(0,7);return this.stats.by_month?.[k]||{}},
       get successRate(){const t=this.stats.total?.requests||0;return t?Math.round((this.stats.total.success||0)*1000/t)/10+'%':'-'},
       get budgetPct(){const hard=Number(this.router.monthly_hard_limit_rmb||0);return hard?Math.min(100,Math.round((Number(this.month.cost_cny||0)/hard)*100)):0},
+      get groupNames(){return [...new Set((this.channels||[]).map(c=>c.group).filter(Boolean))]},
       init(){this.refresh();setInterval(()=>this.refresh(),5000)},
-      async refresh(){try{const r=await fetch(this.base + '/admin/channels',{cache:'no-store'});const d=await r.json();this.channels=d.channels||[];this.stats=d.stats||{total:{}};this.router=d.router||{};this.pricing=d.pricing||{};this.logs=d.logs||[];this.keywordText=(this.router.pro_keywords||[]).join('，');this.lastRefresh=new Date().toLocaleTimeString()}catch(e){this.lastRefresh='读取失败'}},
-      async saveRouter(){this.routerSaving=true;this.router.pro_keywords=this.splitList(this.keywordText);await fetch(this.base + '/admin/router',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.router)});this.routerSaving=false;await this.refresh()},
+      async api(path, options={}){const prefixes=[this.base,''].filter((v,i,a)=>a.indexOf(v)===i);let last;for(const prefix of prefixes){const r=await fetch(prefix+path,{credentials:'include',cache:'no-store',...options});last=r;if(r.status!==404||!prefix)return r}return last},
+      async refresh(){try{const r=await this.api('/admin/channels');if(!r.ok)throw new Error(r.status===401?'需要登录或登录已过期':'HTTP '+r.status);const d=await r.json();this.channels=d.channels||[];this.stats=d.stats||{total:{}};this.router={...this.defaultRouter(),...(d.router||{})};this.pricing=d.pricing||{};this.logs=d.logs||[];this.keywordText=(this.router.pro_keywords&&this.router.pro_keywords.length?this.router.pro_keywords:this.defaultKeywords).join('，');this.loadError='';this.lastRefresh=new Date().toLocaleTimeString()}catch(e){this.loadError='刷新：读取失败（'+e.message+'）'}},
+      defaultRouter(){return{default_group:'deepseek',pro_group:'deepseek',emergency_group:'longcat',backup_group:'',pro_keywords:this.defaultKeywords}},
+      async saveRouter(){this.routerSaving=true;this.router.pro_keywords=this.splitList(this.keywordText);const r=await this.api('/admin/router',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.router)});this.routerSaving=false;if(!r.ok){this.help('保存失败：HTTP '+r.status);return}this.help('路由配置已保存');await this.refresh()},
       splitList(s){return String(s||'').split(/[，,;；\n]+/).map(x=>x.trim()).filter(Boolean)},
       fmt(v){return new Intl.NumberFormat('zh-CN').format(Math.round(Number(v||0)))},
       money(v){return '¥'+Number(v||0).toFixed(4)},
       bucketList(map){return Object.entries(map||{}).map(([name,b])=>({name,...b})).sort((a,b)=>(b.cost_cny||0)-(a.cost_cny||0)||((b.requests||0)-(a.requests||0))).slice(0,8)},
-      copy(t){navigator.clipboard.writeText(t);this.copied=true;setTimeout(()=>this.copied=false,1200)},
-      openAdd(){this.isEdit=false;this.form={name:'',type:'openai',key:'',base:'https://api.deepseek.com',models:'*',model_mapping:'',role:'default',priority:100,cost_model:''};this.showForm=true},
-      openEdit(ch){this.isEdit=true;this.form=JSON.parse(JSON.stringify(ch));this.showForm=true},
-      async saveChannel(){await fetch(this.isEdit?this.base + '/admin/channels/'+this.form.id:this.base + '/admin/channels',{method:this.isEdit?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.form)});this.showForm=false;await this.refresh()},
-      async deleteChannel(id){if(!confirm('确定删除这个渠道吗？'))return;await fetch(this.base + '/admin/channels/'+id,{method:'DELETE'});await this.refresh()}
+      async copy(t){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(t)}else{const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();document.execCommand('copy');ta.remove()}this.help('已复制 API 入口')}catch(e){this.help('复制失败，可以手动选中 API 入口')}},
+      help(t){this.notice=t;clearTimeout(this._noticeTimer);this._noticeTimer=setTimeout(()=>this.notice='',4200)},
+      typeLabel(t){return {openai:'OpenAI 兼容',anthropic:'Anthropic API',other:'其他'}[t||'openai']||t},
+      openAdd(){this.isEdit=false;this.form={};this.applyPreset('longcat');this.testResult=null;this.showForm=true},
+      openEdit(ch){this.isEdit=true;this.form=JSON.parse(JSON.stringify(ch));this.testResult=null;this.showForm=true},
+      applyPreset(kind){const keepKey=this.form?.key||'';const presets={longcat:{name:'LongCat',type:'openai',key:keepKey,base:'https://api.longcat.chat/openai',models:'LongCat-Flash-Chat',model_mapping:JSON.stringify({'gpt-4o':'LongCat-Flash-Chat','gpt-4o-mini':'LongCat-Flash-Chat','gpt-3.5-turbo':'LongCat-Flash-Chat','deepseek-v4-flash':'LongCat-Flash-Chat','deepseek-v4-pro':'LongCat-Flash-Chat','coding-plan':'LongCat-Flash-Chat'},null,2),role:'emergency',group:'longcat',priority:100,cost_model:'longcat'},deepseek_flash:{name:'DeepSeek V4 Flash',type:'openai',key:keepKey,base:'https://api.deepseek.com',models:'deepseek-v4-flash',model_mapping:'',role:'default',group:'deepseek',priority:50,cost_model:'deepseek-v4-flash'},deepseek_pro:{name:'DeepSeek V4 Pro',type:'openai',key:keepKey,base:'https://api.deepseek.com',models:'deepseek-v4-pro',model_mapping:'',role:'pro',group:'deepseek',priority:60,cost_model:'deepseek-v4-pro-discount'},anthropic:{name:'Anthropic',type:'anthropic',key:keepKey,base:'https://api.anthropic.com',models:'claude-3-5-haiku-latest',model_mapping:'',role:'backup',group:'anthropic',priority:100,cost_model:'anthropic'},openai:{name:'OpenAI Compatible',type:'openai',key:keepKey,base:'https://api.example.com',models:'gpt-4o-mini',model_mapping:'',role:'default',group:'default-pool',priority:100,cost_model:''}};this.form={...(this.form||{}),...presets[kind]};this.testResult=null},
+      async testChannel(ch){this.testing=true;this.testResult=null;try{const r=await this.api('/admin/channels/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ch)});const d=await r.json();this.testResult=d;this.help(d.ok?'测试通过':'测试失败：'+(d.message||('HTTP '+d.status)));await this.refresh()}catch(e){this.testResult={ok:false,status:0,message:String(e),latency_ms:0};this.help('测试失败：'+e.message)}finally{this.testing=false}},
+      async saveChannel(){const r=await this.api(this.isEdit?'/admin/channels/'+this.form.id:'/admin/channels',{method:this.isEdit?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.form)});if(!r.ok){this.help('保存失败：HTTP '+r.status);return}this.showForm=false;this.help('渠道已保存');await this.refresh()},
+      async deleteChannel(id){if(!confirm('确定删除这个渠道吗？'))return;const r=await this.api('/admin/channels/'+id,{method:'DELETE'});if(!r.ok){this.help('删除失败：HTTP '+r.status);return}await this.refresh()}
     }}
   </script>
 </body>
