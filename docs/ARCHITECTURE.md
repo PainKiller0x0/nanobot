@@ -348,6 +348,26 @@ PYTHONPATH=/root/nanobot uv run pytest tests/cli/test_commands.py::test_heartbea
 
 如果 `check-nanobot-exp-patches.sh` 失败，先不要重启线上服务，先确认是上游重构导致的真实冲突，还是 ops 快照没有同步。
 
+## 模型切换 smoke
+
+切换默认模型、Pro 模型、backup/emergency 模型或 OBP upstream 渠道后，必须跑模型切换 smoke：
+
+```bash
+python3 ops/scripts/smoke-model-switch.py --with-llm
+python3 ops/scripts/smoke-model-switch.py --refresh-lof
+```
+
+覆盖范围：
+
+- sidecar manager、dashboard system、LOF 状态和刷新。
+- RSS 订阅、最近文章、Markdown 预览、自动刷新。
+- Notify cron jobs、QQ sidecar、Reflexio stats。
+- Trend Radar 状态、MCP 工具列表和 MCP-like call。
+- OBP OpenAI shell、Anthropic shell、工具调用、compact 升 Pro、历史关键词防污染。
+- Nanobot provider 默认模型链路和 `podman logs -f nanobot-cage` 的 OBP route header。
+
+这套 smoke 的目标不是测模型智商，而是确认“换模型不丢 sidecar 能力、不误升 Pro、不破坏工具调用、不把预算熔断顺序打乱”。
+
 ## 变更 checklist
 
 新增功能时按这个顺序判断：
