@@ -168,6 +168,14 @@ const LIGHTWEIGHT_HINTS: &[&str] = &[
     "fast_chat",
 ];
 
+const LIGHTWEIGHT_TEXT_PATTERNS: &[&str] = &[
+    "heartbeat.md",
+    "heartbeat agent",
+    "heartbeat tool",
+    "\"name\":\"heartbeat\"",
+    "\"name\": \"heartbeat\"",
+];
+
 const PRO_TEXT_PATTERNS: &[&str] = &[
     "context compression",
     "context summary",
@@ -538,6 +546,10 @@ fn route_decision(
         .iter()
         .find(|pattern| routing_text.contains(**pattern))
         .map(|pattern| (*pattern).to_string());
+    let light_text_hit = LIGHTWEIGHT_TEXT_PATTERNS
+        .iter()
+        .find(|pattern| routing_text.contains(**pattern))
+        .map(|pattern| (*pattern).to_string());
     let keyword_hit = router
         .pro_keywords
         .iter()
@@ -561,13 +573,18 @@ fn route_decision(
             reason = light_reason;
         }
     }
-    if !wants_pro && !hint_matches(&hints.intent, LIGHTWEIGHT_HINTS) {
+    if !wants_pro {
+        if let Some(pattern) = light_text_hit.as_deref() {
+            reason = format!("task pattern keeps default: {}", pattern);
+        }
+    }
+    if !wants_pro && light_text_hit.is_none() && !hint_matches(&hints.intent, LIGHTWEIGHT_HINTS) {
         if let Some(pattern) = pro_text_hit {
             wants_pro = true;
             reason = format!("task pattern matched: {}", pattern);
         }
     }
-    if !wants_pro && !hint_matches(&hints.intent, LIGHTWEIGHT_HINTS) {
+    if !wants_pro && light_text_hit.is_none() && !hint_matches(&hints.intent, LIGHTWEIGHT_HINTS) {
         if let Some(keyword) = keyword_hit {
             wants_pro = true;
             reason = format!("keyword matched: {}", keyword);
