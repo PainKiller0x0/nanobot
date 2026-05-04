@@ -25,6 +25,13 @@ ITEMS_FILE = DATA_DIR / "items.json"
 MD_DIR = DATA_DIR / "markdown"
 MAX_FETCH_BYTES = 2_000_000
 TIMEOUT_SECS = 15
+LLM_TIMEOUT_SECS = float(os.environ.get("NANOBOT_INBOX_LLM_TIMEOUT_SECS", "14"))
+LLM_SETTINGS_PATH = Path(
+    os.environ.get(
+        "NANOBOT_INBOX_LLM_SETTINGS",
+        "/root/.nanobot/workspace/wechat_rss_service/settings.json",
+    )
+)
 USER_AGENT = "NanobotKnowledgeInbox/1.0 (+local personal assistant)"
 WECHAT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -120,6 +127,86 @@ def request_headers_for_url(url: str) -> dict[str, str]:
             "Referer": "https://mp.weixin.qq.com/",
         })
     return headers
+
+
+def load_free_longcat_settings() -> dict[str, str] | None:
+    if os.environ.get("NANOBOT_INBOX_LLM_ENABLED", "1").strip().lower() in {"0", "false", "off", "no"}:
+        return None
+    try:
+        raw = json.loads(LLM_SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    llm = raw.get("llm") if isinstance(raw.get("llm"), dict) else raw
+    if not isinstance(llm, dict) or not llm.get("enabled", False):
+        return None
+    api_base = str(llm.get("api_base") or "").strip()
+    api_key = str(llm.get("api_key") or "").strip()
+    model = str(llm.get("model") or "").strip()
+    if not api_base or not api_key or not model:
+        return None
+    if "longcat" not in api_base.lower() or "longcat-flash-lite" not in model.lower():
+        return None
+    return {"api_base": api_base, "api_key": api_key, "model": model}
+
+
+def chat_completions_url(api_base: str) -> str:
+    url = api_base.rstrip("/")
+    if not url.endswith("/chat/completions"):
+        url += "/chat/completions"
+    return url
+
+
+def plain_markdown_for_summary(markdown: str, limit: int = 7000) -> str:
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", markdown or "")
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"[#>*_`\-]+", " ", text)
+    text = clean_ws(text)
+    return text[:limit]
+
+
+def summarize_with_longcat(title: str, markdown: str) -> str:
+    settings = load_free_longcat_settings()
+    if not settings:
+        return ""
+    body = plain_markdown_for_summary(markdown)
+    if len(body) < 600:
+        return ""
+    prompt = (
+        "请用中文为下面文章做一个给个人知识收件箱看的摘要。\n"
+        "要求：3条短 bullet；不要复述链接；不要输出标题；总字数控制在180字以内；"
+        "重点说明核心观点、为什么值得看、我可以怎么用。\n\n"
+        f"标题：{title}\n\n正文：\n{body}"
+    )
+    payload = {
+        "model": settings["model"],
+        "messages": [
+            {"role": "system", "content": "你是一个克制、准确的中文阅读摘要助手。"},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 260,
+        "stream": False,
+    }
+    req = Request(
+        chat_completions_url(settings["api_base"]),
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {settings['api_key']}",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=LLM_TIMEOUT_SECS) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return ""
+    content = (
+        data.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+    )
+    return clean_ws(content)[:360]
 
 
 class MarkdownHTMLParser(HTMLParser):
@@ -390,6 +477,8 @@ def capture(url: str, note: str = "", tags: list[str] | None = None, force: bool
     item_id = existing.get("id") if existing and not force else item_id_for_url(page.final_url or page.url)
     score, label, reasons = score_page(page.title, page.description, page.markdown)
     keywords = extract_keywords(f"{page.title}\n{page.description}\n{page.markdown}")
+    extractive_summary = first_sentences(page.description or page.markdown)
+    llm_summary = summarize_with_longcat(page.title, page.markdown)
     item = {
         "id": item_id,
         "url": page.url,
@@ -397,7 +486,9 @@ def capture(url: str, note: str = "", tags: list[str] | None = None, force: bool
         "host": urlparse(page.final_url or page.url).netloc,
         "title": page.title,
         "description": page.description,
-        "summary": first_sentences(page.description or page.markdown),
+        "summary": llm_summary or extractive_summary,
+        "summary_source": "longcat_free" if llm_summary else "extractive",
+        "extractive_summary": extractive_summary,
         "captured_at": now_local().isoformat(timespec="seconds"),
         "content_type": page.content_type,
         "content_chars": len(page.markdown),
@@ -491,19 +582,14 @@ def render_item(item: dict[str, Any], verbose: bool = False) -> str:
         f"判断：{item.get('decision_label')}（{item.get('decision_score')}/100）",
     ]
     if item.get("summary"):
-        lines.append(f"摘要：{item.get('summary')}")
+        summary = str(item.get("summary") or "").strip()
+        if "\n" in summary:
+            lines.append("摘要：\n" + summary)
+        else:
+            lines.append(f"摘要：{summary}")
     reasons = item.get("decision_reasons") or []
     if reasons:
         lines.append("理由：" + "；".join(str(x) for x in reasons[:3]))
-    if item.get("keywords"):
-        lines.append("关键词：" + "、".join(item.get("keywords", [])[:8]))
-    if verbose:
-        links = item.get("links") or []
-        if links:
-            lines.append("可点链接：")
-            for link in links[:5]:
-                lines.append(f"- [{short(link.get('text'), 30)}]({link.get('url')})")
-        lines.append(f"Markdown：{item.get('markdown_path')}")
     return "\n".join(lines)
 
 
@@ -637,7 +723,7 @@ def main() -> int:
     try:
         if args.command == "capture":
             item = capture(args.url, note=args.note, tags=args.tag, force=args.force)
-            print(render_item(item, verbose=True))
+            print(render_item(item))
         elif args.command == "decide":
             print(render_decide(args.target, question=args.question))
         elif args.command == "list":
