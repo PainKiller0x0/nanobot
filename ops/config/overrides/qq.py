@@ -1520,7 +1520,7 @@ class QQChannel(BaseChannel):
 
         # WeChat/Yage links have dedicated handlers. Do not steal them unless the
         # user explicitly asks to put the link into the generic inbox.
-        if any(special in host for special in _INBOX_SPECIAL_HOSTS) and not explicit_inbox:
+        if any(special in host for special in _INBOX_SPECIAL_HOSTS) and not (explicit_inbox or only_url):
             return None
         if decision:
             question = _GENERIC_URL_RE.sub("", text).strip()

@@ -63,3 +63,4 @@ python3 /root/.nanobot/workspace/skills/knowledge-inbox/inbox.py brief --limit 8
 - 用户问“收件箱”“待读列表”“今天先看什么”，使用 list 或 brief。
 - 用户明确要求删除某条收件箱内容时，使用 delete；只删除用户指定的唯一条目，不批量清空。
 - 微信文章和鸭哥 AI 正文仍优先走 RSS sidecar 专用 skill；本 skill 只负责通用链接收件箱。
+- 如果微信 `mp.weixin.qq.com` 链接只能抓到“环境异常”，不要保存验证页正文；保存原文链接占位并标记为待补正文。

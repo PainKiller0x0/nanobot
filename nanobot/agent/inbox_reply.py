@@ -75,6 +75,10 @@ def extract_inbox_intent(text: str) -> dict[str, Any] | None:
     if any(marker in compact for marker in _DECIDE_COMPACT_MARKERS):
         return {"action": "decide", "url": url, "question": raw}
 
+    raw_without_punct = raw.strip().rstrip(_TRAILING_PUNCT).strip()
+    if raw_without_punct == url:
+        return {"action": "capture", "url": url}
+
     if raw.startswith(_CAPTURE_PREFIXES) or any(marker in compact for marker in _CAPTURE_COMPACT_MARKERS):
         return {"action": "capture", "url": url}
 

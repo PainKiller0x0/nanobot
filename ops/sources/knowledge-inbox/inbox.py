@@ -10,7 +10,6 @@ import json
 import os
 import re
 import sys
-import textwrap
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -27,6 +26,8 @@ MD_DIR = DATA_DIR / "markdown"
 MAX_FETCH_BYTES = 2_000_000
 TIMEOUT_SECS = 15
 USER_AGENT = "NanobotKnowledgeInbox/1.0 (+local personal assistant)"
+WECHAT_HOSTS = {"mp.weixin.qq.com"}
+WECHAT_ENV_MARKERS = ("环境异常", "当前环境异常", "完成验证后即可继续访问", "去验证")
 
 INTEREST_KEYWORDS = {
     "ai", "llm", "agent", "openai", "claude", "gemini", "rust", "python", "nanobot",
@@ -87,6 +88,36 @@ def valid_url(value: str) -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("只支持 http/https URL")
     return url
+
+
+def is_wechat_article_url(url: str) -> bool:
+    parsed = urlparse(url or "")
+    return parsed.netloc.lower() in WECHAT_HOSTS
+
+
+def looks_like_wechat_env_block(title: str, markdown: str) -> bool:
+    text = clean_ws(f"{title}\n{markdown}")
+    return "环境异常" in text and any(marker in text for marker in WECHAT_ENV_MARKERS)
+
+
+def wechat_placeholder_page(page: "FetchedPage") -> FetchedPage:
+    url = page.url
+    markdown = "\n".join([
+        "# 微信文章（待补正文）",
+        "",
+        f"- 原文链接: [Open Link]({url})",
+        "- 状态: 微信环境验证页，通用抓取无法读取正文。",
+        "",
+        "> 已保留原文链接，没有保存 `环境异常` 验证页内容。",
+    ])
+    return FetchedPage(
+        url=page.url,
+        final_url=page.url,
+        title="微信文章（待补正文）",
+        description="微信限制通用抓取，已保存原文链接；后续可通过 RSS sidecar 或浏览器补正文。",
+        markdown=markdown,
+        content_type=page.content_type,
+    )
 
 
 class MarkdownHTMLParser(HTMLParser):
@@ -349,11 +380,19 @@ def write_markdown(item: dict[str, Any], markdown: str) -> Path:
 def capture(url: str, note: str = "", tags: list[str] | None = None, force: bool = False) -> dict[str, Any]:
     ensure_dirs()
     page = fetch_url(url)
+    wechat_blocked = is_wechat_article_url(page.final_url or page.url) and looks_like_wechat_env_block(page.title, page.markdown)
+    if wechat_blocked:
+        page = wechat_placeholder_page(page)
     items = load_items()
     existing = next((v for v in items.values() if v.get("url") == page.url or v.get("final_url") == page.final_url), None)
     item_id = existing.get("id") if existing and not force else item_id_for_url(page.final_url or page.url)
-    score, label, reasons = score_page(page.title, page.description, page.markdown)
-    keywords = extract_keywords(f"{page.title}\n{page.description}\n{page.markdown}")
+    if wechat_blocked:
+        score, label, reasons = (50, "待补正文", ["微信限制通用抓取，已保留原文链接但未保存验证页"])
+        keywords = ["微信文章", "待补正文"]
+        tags = [*(tags or []), "wechat", "needs-fetch"]
+    else:
+        score, label, reasons = score_page(page.title, page.description, page.markdown)
+        keywords = extract_keywords(f"{page.title}\n{page.description}\n{page.markdown}")
     item = {
         "id": item_id,
         "url": page.url,
@@ -372,6 +411,7 @@ def capture(url: str, note: str = "", tags: list[str] | None = None, force: bool
         "links": extract_links(page.markdown),
         "note": note,
         "tags": tags or [],
+        "source_status": "wechat_env_blocked" if wechat_blocked else "ok",
     }
     md_path = write_markdown(item, page.markdown)
     item["markdown_path"] = str(md_path)
