@@ -396,6 +396,57 @@ def find_item(ref: str) -> dict[str, Any] | None:
     return None
 
 
+def resolve_item_key(ref: str, items: dict[str, dict[str, Any]]) -> str | None:
+    ref = (ref or "").strip()
+    if not ref:
+        return None
+    if ref in items:
+        return ref
+    exact = [key for key, item in items.items() if str(item.get("id") or "") == ref]
+    if len(exact) == 1:
+        return exact[0]
+    matches = sorted({
+        key
+        for key, item in items.items()
+        if key.startswith(ref) or str(item.get("id") or "").startswith(ref)
+    })
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def safe_unlink_markdown(item: dict[str, Any]) -> bool:
+    raw = str(item.get("markdown_path") or "").strip()
+    if not raw:
+        return False
+    path = Path(raw)
+    if not path.is_absolute():
+        path = DATA_DIR / path
+    try:
+        resolved = path.resolve(strict=True)
+        data_root = DATA_DIR.resolve(strict=True)
+    except OSError:
+        return False
+    if not resolved.is_file() or data_root not in (resolved, *resolved.parents):
+        return False
+    try:
+        resolved.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def delete_item(ref: str, keep_markdown: bool = False) -> tuple[dict[str, Any], bool]:
+    items = load_items()
+    key = resolve_item_key(ref, items)
+    if key is None:
+        raise ValueError(f"没找到唯一匹配的收件箱条目：{ref}")
+    item = items.pop(key)
+    save_items(items)
+    markdown_deleted = False if keep_markdown else safe_unlink_markdown(item)
+    return item, markdown_deleted
+
+
 def render_item(item: dict[str, Any], verbose: bool = False) -> str:
     lines = [
         f"📥 已入收件箱：{item.get('title') or '未命名'}",
@@ -444,6 +495,19 @@ def render_read(ref: str, chars: int = 900) -> str:
         "预览：",
         short(body, chars),
     ])
+
+
+def render_delete(ref: str, keep_markdown: bool = False) -> str:
+    item, markdown_deleted = delete_item(ref, keep_markdown=keep_markdown)
+    lines = [
+        f"🗑️ 已删除收件箱条目：{item.get('title') or '未命名'}",
+        f"ID：{item.get('id')}",
+    ]
+    if keep_markdown:
+        lines.append("Markdown：已保留")
+    else:
+        lines.append("Markdown：" + ("已删除" if markdown_deleted else "未找到或已跳过"))
+    return "\n".join(lines)
 
 
 def render_decide(target: str, question: str = "") -> str:
@@ -525,6 +589,10 @@ def main() -> int:
     p_read.add_argument("ref")
     p_read.add_argument("--chars", type=int, default=900)
 
+    p_delete = sub.add_parser("delete")
+    p_delete.add_argument("ref")
+    p_delete.add_argument("--keep-markdown", action="store_true")
+
     p_brief = sub.add_parser("brief")
     p_brief.add_argument("--limit", type=int, default=8)
 
@@ -539,6 +607,8 @@ def main() -> int:
             print(render_list(max(1, min(args.limit, 30))))
         elif args.command == "read":
             print(render_read(args.ref, chars=max(200, min(args.chars, 5000))))
+        elif args.command == "delete":
+            print(render_delete(args.ref, keep_markdown=args.keep_markdown))
         elif args.command == "brief":
             print(render_brief(max(1, min(args.limit, 30))))
     except Exception as exc:  # noqa: BLE001 - QQ should receive a compact failure.

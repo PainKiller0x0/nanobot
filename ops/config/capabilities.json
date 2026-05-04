@@ -31,13 +31,17 @@
     "category": "信息",
     "kind": "skill",
     "service_id": null,
-    "entry_url": null,
+    "entry_url": "/inbox",
     "enabled": true,
     "trigger_phrases": ["收一下 + 链接", "这个值得看吗 + 链接", "收件箱"],
     "commands": [
       {
         "label": "查看收件箱",
         "command": "python /root/.nanobot/workspace/skills/knowledge-inbox/inbox.py list"
+      },
+      {
+        "label": "删除条目",
+        "command": "python /root/.nanobot/workspace/skills/knowledge-inbox/inbox.py delete <条目ID>"
       }
     ],
     "data_paths": ["/root/.nanobot/data/knowledge-inbox"],

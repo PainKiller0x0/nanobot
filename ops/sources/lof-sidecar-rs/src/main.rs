@@ -11,7 +11,7 @@ use axum::{
     extract::{Path as AxumPath, State},
     http::{header, HeaderMap, Method, StatusCode, Uri},
     response::{Html, IntoResponse, Response},
-    routing::{any, get, post},
+    routing::{any, delete, get, post},
     Json, Router,
 };
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, FixedOffset, Timelike, Utc};
@@ -340,6 +340,7 @@ async fn main() {
         .route("/inbox", get(inbox_page))
         .route("/api/sidecars", get(api_sidecars))
         .route("/api/inbox", get(api_inbox))
+        .route("/api/inbox/:id", delete(api_delete_inbox))
         .route("/api/capabilities", get(api_capabilities))
         .route("/api/evolution", get(api_evolution))
         .route("/api/notify-jobs", get(api_notify_jobs))
@@ -399,6 +400,24 @@ async fn api_dashboard_history(State(state): State<AppState>) -> impl IntoRespon
 
 async fn api_inbox(State(state): State<AppState>) -> impl IntoResponse {
     Json(inbox_snapshot(&state.inbox_dir).await)
+}
+
+async fn api_delete_inbox(
+    State(state): State<AppState>,
+    AxumPath(ref_id): AxumPath<String>,
+) -> Response {
+    match delete_inbox_item(&state.inbox_dir, &ref_id).await {
+        Ok(value) => (StatusCode::OK, Json(value)).into_response(),
+        Err((status, message)) => (
+            status,
+            Json(serde_json::json!({
+                "ok": false,
+                "id": ref_id,
+                "error": message,
+            })),
+        )
+            .into_response(),
+    }
 }
 
 async fn refresh_dashboard_history(state: &AppState) -> serde_json::Value {
@@ -1128,7 +1147,7 @@ async fn inbox_page() -> impl IntoResponse {
 <style>
 :root{--bg:#f7f0e4;--panel:#fffdf7;--text:#202019;--muted:#6f695d;--line:#e4dac8;--accent:#b96a33;--accent2:#287f73;--ok:#16844d;--warn:#b76a12;--bad:#c43d32;--shadow:0 22px 70px rgba(73,50,24,.14)}
 [data-theme="dark"]{--bg:#101816;--panel:#1b2621;--text:#edf5ea;--muted:#a8b5a4;--line:#304038;--accent:#efa35c;--accent2:#77c7b7;--ok:#76d39a;--warn:#f3c468;--bad:#ff8278;--shadow:0 22px 72px rgba(0,0,0,.36)}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--text);font-family:"Avenir Next","PingFang SC","Microsoft YaHei",sans-serif;background:radial-gradient(900px 520px at -8% -18%,rgba(185,106,51,.22),transparent 58%),radial-gradient(740px 460px at 108% 0,rgba(40,127,115,.18),transparent 55%),var(--bg)}.wrap{max-width:1120px;margin:0 auto;padding:26px 16px 42px}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:26px;box-shadow:var(--shadow);padding:22px}.eyebrow{color:var(--accent2);font-size:12px;font-weight:900;letter-spacing:.16em}.title{font-family:Georgia,"Noto Serif SC",serif;font-size:44px;line-height:1.04;margin:8px 0 10px;letter-spacing:-.04em}.sub{color:var(--muted);line-height:1.75;margin:0}.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.btn{border:1px solid var(--line);border-radius:999px;padding:10px 14px;background:var(--text);color:var(--bg);font-weight:900;text-decoration:none;cursor:pointer}.btn.secondary{background:transparent;color:var(--text)}.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat{border:1px solid var(--line);border-radius:18px;padding:14px;background:rgba(255,255,255,.16)}.k{font-size:12px;color:var(--muted);font-weight:800}.v{font-size:30px;font-weight:950;letter-spacing:-.04em}.grid{display:grid;gap:12px;margin-top:14px}.item{display:grid;grid-template-columns:72px 1fr auto;gap:14px;align-items:start;border:1px solid var(--line);border-radius:22px;padding:16px;background:rgba(255,255,255,.16)}.score{width:58px;height:58px;border-radius:18px;display:grid;place-items:center;font-weight:950;font-size:20px;border:1px solid var(--line);background:rgba(255,255,255,.20)}.score.ok{color:var(--ok)}.score.warn{color:var(--warn)}.score.bad{color:var(--bad)}.name{font-size:19px;font-weight:950;line-height:1.35}.name a{color:var(--text);text-decoration:none}.name a:hover{color:var(--accent2);text-decoration:underline}.meta{color:var(--muted);font-size:13px;line-height:1.6;margin-top:6px}.summary{margin-top:9px;color:var(--text);line-height:1.7}.tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.tag{border:1px solid var(--line);border-radius:999px;padding:4px 8px;color:var(--muted);font-size:12px}.path{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;color:var(--muted);max-width:280px;word-break:break-all}.empty{color:var(--muted);padding:24px}.mini{font-size:12px;color:var(--muted);line-height:1.5}.good{color:var(--ok)}.warnText{color:var(--warn)}.danger{color:var(--bad)}@media(max-width:820px){.hero{grid-template-columns:1fr}.title{font-size:34px}.item{grid-template-columns:1fr}.path{max-width:none}.stats{grid-template-columns:1fr}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--text);font-family:"Avenir Next","PingFang SC","Microsoft YaHei",sans-serif;background:radial-gradient(900px 520px at -8% -18%,rgba(185,106,51,.22),transparent 58%),radial-gradient(740px 460px at 108% 0,rgba(40,127,115,.18),transparent 55%),var(--bg)}.wrap{max-width:1120px;margin:0 auto;padding:26px 16px 42px}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:26px;box-shadow:var(--shadow);padding:22px}.eyebrow{color:var(--accent2);font-size:12px;font-weight:900;letter-spacing:.16em}.title{font-family:Georgia,"Noto Serif SC",serif;font-size:44px;line-height:1.04;margin:8px 0 10px;letter-spacing:-.04em}.sub{color:var(--muted);line-height:1.75;margin:0}.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.btn{border:1px solid var(--line);border-radius:999px;padding:10px 14px;background:var(--text);color:var(--bg);font-weight:900;text-decoration:none;cursor:pointer}.btn.secondary{background:transparent;color:var(--text)}.btn.danger{background:transparent;color:var(--bad);border-color:var(--bad)}.btn.small{padding:7px 10px;font-size:12px;box-shadow:none}.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat{border:1px solid var(--line);border-radius:18px;padding:14px;background:rgba(255,255,255,.16)}.k{font-size:12px;color:var(--muted);font-weight:800}.v{font-size:30px;font-weight:950;letter-spacing:-.04em}.grid{display:grid;gap:12px;margin-top:14px}.item{display:grid;grid-template-columns:72px 1fr auto;gap:14px;align-items:start;border:1px solid var(--line);border-radius:22px;padding:16px;background:rgba(255,255,255,.16)}.score{width:58px;height:58px;border-radius:18px;display:grid;place-items:center;font-weight:950;font-size:20px;border:1px solid var(--line);background:rgba(255,255,255,.20)}.score.ok{color:var(--ok)}.score.warn{color:var(--warn)}.score.bad{color:var(--bad)}.name{font-size:19px;font-weight:950;line-height:1.35}.name a{color:var(--text);text-decoration:none}.name a:hover{color:var(--accent2);text-decoration:underline}.meta{color:var(--muted);font-size:13px;line-height:1.6;margin-top:6px}.summary{margin-top:9px;color:var(--text);line-height:1.7}.tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.tag{border:1px solid var(--line);border-radius:999px;padding:4px 8px;color:var(--muted);font-size:12px}.path{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;color:var(--muted);max-width:280px;word-break:break-all}.itemActions{display:grid;gap:8px;justify-items:end}.empty{color:var(--muted);padding:24px}.mini{font-size:12px;color:var(--muted);line-height:1.5}.good{color:var(--ok)}.warnText{color:var(--warn)}.danger{color:var(--bad)}@media(max-width:820px){.hero{grid-template-columns:1fr}.title{font-size:34px}.item{grid-template-columns:1fr}.path{max-width:none}.itemActions{justify-items:start}.stats{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -1153,7 +1172,30 @@ function fmtTime(s){if(!s)return '-';try{return new Date(s).toLocaleString('zh-C
 function host(u){try{return new URL(u).host}catch{return '-'}}
 function cls(score){score=Number(score)||0;return score>=75?'ok':score>=58?'warn':'bad'}
 function label(item){return item.decision_label||((Number(item.decision_score)||0)>=75?'值得优先看':((Number(item.decision_score)||0)>=58?'可以稍后看':'扫一眼'))}
-function render(data){const s=data.summary||{};document.getElementById('stats').innerHTML=stat('总数',s.total??0,'历史收进来的网页')+stat('今天',s.today??0,'今天新增')+stat('优先读',s.priority??0,'评分 ≥ 75')+stat('可跳过',s.skipped??0,'评分 < 42');const items=data.items||[];document.getElementById('items').innerHTML=items.length?items.map(item=>{const score=Number(item.decision_score)||0;const url=item.final_url||item.url||'#';const tags=(item.keywords||[]).slice(0,6).map(t=>`<span class="tag">${esc(t)}</span>`).join('');return `<article class="item"><div class="score ${cls(score)}">${esc(score)}</div><div><div class="name"><a href="${esc(url)}" target="_blank" rel="noopener">${esc(item.title||'未命名网页')}</a></div><div class="meta">${esc(label(item))} · ${esc(host(url))} · ${fmtTime(item.captured_at)} · ${esc(item.content_chars||0)} 字</div><div class="summary">${esc(item.summary||item.description||'暂无摘要')}</div><div class="tags">${tags}</div></div><div class="path">${esc(item.markdown_path||'暂无 Markdown 路径')}</div></article>`}).join(''):'<div class="panel empty">收件箱还是空的。QQ 发“收一下 https://example.com”就能开始积累。</div>'}
+function render(data){
+  const s=data.summary||{};
+  document.getElementById('stats').innerHTML=stat('总数',s.total??0,'历史收进来的网页')+stat('今天',s.today??0,'今天新增')+stat('优先读',s.priority??0,'评分 ≥ 75')+stat('可跳过',s.skipped??0,'评分 < 42');
+  const items=data.items||[];
+  document.getElementById('items').innerHTML=items.length?items.map(item=>{
+    const score=Number(item.decision_score)||0;
+    const url=item.final_url||item.url||'#';
+    const tags=(item.keywords||[]).slice(0,6).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
+    const itemId=String(item.id||'');
+    const title=String(item.title||'未命名网页');
+    return `<article class="item"><div class="score ${cls(score)}">${esc(score)}</div><div><div class="name"><a href="${esc(url)}" target="_blank" rel="noopener">${esc(title)}</a></div><div class="meta">${esc(label(item))} · ${esc(host(url))} · ${fmtTime(item.captured_at)} · ${esc(item.content_chars||0)} 字</div><div class="summary">${esc(item.summary||item.description||'暂无摘要')}</div><div class="tags">${tags}</div></div><div class="itemActions"><div class="path">${esc(item.markdown_path||'暂无 Markdown 路径')}</div><button class="btn danger small" data-id="${esc(itemId)}" data-title="${esc(title)}" onclick="deleteItemFromButton(this)">删除</button></div></article>`
+  }).join(''):'<div class="panel empty">收件箱还是空的。QQ 发“收一下 https://example.com”就能开始积累。</div>'
+}
+function deleteItemFromButton(btn){deleteItem(btn.dataset.id||'',btn.dataset.title||'未命名网页')}
+async function deleteItem(id,title){
+  if(!id)return alert('这个条目没有 ID，不能删除');
+  if(!confirm(`删除这条收件箱内容？\n\n${title}\n${id}`))return;
+  try{
+    const r=await fetch('/api/inbox/'+encodeURIComponent(id),{method:'DELETE'});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok||data.ok===false)throw new Error(data.error||'删除失败');
+    await loadAll();
+  }catch(e){alert('删除失败：'+(e&&e.message?e.message:e))}
+}
 async function loadAll(){try{const r=await fetch('/api/inbox',{cache:'no-store'});render(await r.json())}catch(e){document.getElementById('items').innerHTML='<div class="panel empty danger">读取失败：'+esc(e.message)+'</div>'}}
 loadAll();
 </script>
@@ -1409,6 +1451,161 @@ async fn capability_registry_snapshot(state: &AppState) -> CapabilityRegistryRes
         },
         items,
     }
+}
+
+fn inbox_item_id(item: &serde_json::Value) -> Option<&str> {
+    item.get("id").and_then(|value| value.as_str())
+}
+
+fn resolve_inbox_map_key(
+    map: &serde_json::Map<String, serde_json::Value>,
+    ref_id: &str,
+) -> Result<String, (StatusCode, String)> {
+    if map.contains_key(ref_id) {
+        return Ok(ref_id.to_string());
+    }
+    let mut matches: Vec<String> = map
+        .iter()
+        .filter_map(|(key, item)| {
+            let id = inbox_item_id(item).unwrap_or(key);
+            if key.starts_with(ref_id) || id.starts_with(ref_id) {
+                Some(key.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    matches.sort();
+    matches.dedup();
+    match matches.len() {
+        0 => Err((StatusCode::NOT_FOUND, "没找到这个收件箱条目".to_string())),
+        1 => Ok(matches.remove(0)),
+        _ => Err((
+            StatusCode::CONFLICT,
+            "匹配到多个条目，请使用完整 ID".to_string(),
+        )),
+    }
+}
+
+fn resolve_inbox_array_index(
+    items: &[serde_json::Value],
+    ref_id: &str,
+) -> Result<usize, (StatusCode, String)> {
+    if let Some(pos) = items
+        .iter()
+        .position(|item| inbox_item_id(item).is_some_and(|id| id == ref_id))
+    {
+        return Ok(pos);
+    }
+    let matches: Vec<usize> = items
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, item)| {
+            inbox_item_id(item)
+                .is_some_and(|id| id.starts_with(ref_id))
+                .then_some(idx)
+        })
+        .collect();
+    match matches.len() {
+        0 => Err((StatusCode::NOT_FOUND, "没找到这个收件箱条目".to_string())),
+        1 => Ok(matches[0]),
+        _ => Err((
+            StatusCode::CONFLICT,
+            "匹配到多个条目，请使用完整 ID".to_string(),
+        )),
+    }
+}
+
+async fn write_inbox_json(
+    items_file: &Path,
+    value: &serde_json::Value,
+) -> Result<(), (StatusCode, String)> {
+    if let Some(parent) = items_file.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    }
+    let body = serde_json::to_string_pretty(value)
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let tmp = items_file.with_extension("json.tmp");
+    tokio::fs::write(&tmp, format!("{}\n", body))
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    tokio::fs::rename(&tmp, items_file)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(())
+}
+
+async fn remove_inbox_markdown(
+    inbox_dir: &Path,
+    item: &serde_json::Value,
+) -> (bool, Option<String>) {
+    let Some(raw_path) = item.get("markdown_path").and_then(|value| value.as_str()) else {
+        return (false, None);
+    };
+    let path = PathBuf::from(raw_path);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        inbox_dir.join(path)
+    };
+    let Ok(root) = tokio::fs::canonicalize(inbox_dir).await else {
+        return (false, Some(raw_path.to_string()));
+    };
+    let Ok(resolved) = tokio::fs::canonicalize(&path).await else {
+        return (false, Some(raw_path.to_string()));
+    };
+    if !resolved.starts_with(&root) {
+        return (false, Some(raw_path.to_string()));
+    }
+    match tokio::fs::remove_file(&resolved).await {
+        Ok(_) => (true, Some(raw_path.to_string())),
+        Err(_) => (false, Some(raw_path.to_string())),
+    }
+}
+
+async fn delete_inbox_item(
+    inbox_dir: &Path,
+    ref_id: &str,
+) -> Result<serde_json::Value, (StatusCode, String)> {
+    let ref_id = ref_id.trim();
+    if ref_id.is_empty() || ref_id.contains('/') || ref_id.contains('\\') {
+        return Err((StatusCode::BAD_REQUEST, "条目 ID 不合法".to_string()));
+    }
+    let items_file = inbox_dir.join("items.json");
+    let raw = tokio::fs::read_to_string(&items_file)
+        .await
+        .unwrap_or_else(|_| "{}".to_string());
+    let mut parsed =
+        serde_json::from_str::<serde_json::Value>(&raw).unwrap_or_else(|_| serde_json::json!({}));
+    let deleted = match &mut parsed {
+        serde_json::Value::Object(map) => {
+            let key = resolve_inbox_map_key(map, ref_id)?;
+            map.remove(&key)
+                .ok_or_else(|| (StatusCode::NOT_FOUND, "没找到这个收件箱条目".to_string()))?
+        }
+        serde_json::Value::Array(items) => {
+            let idx = resolve_inbox_array_index(items, ref_id)?;
+            items.remove(idx)
+        }
+        _ => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "items.json 格式不支持".to_string(),
+            ))
+        }
+    };
+    write_inbox_json(&items_file, &parsed).await?;
+    let (markdown_deleted, markdown_path) = remove_inbox_markdown(inbox_dir, &deleted).await;
+    Ok(serde_json::json!({
+        "ok": true,
+        "deleted": true,
+        "id": inbox_item_id(&deleted).unwrap_or(ref_id),
+        "title": deleted.get("title").and_then(|value| value.as_str()).unwrap_or(""),
+        "markdown_deleted": markdown_deleted,
+        "markdown_path": markdown_path,
+    }))
 }
 
 async fn inbox_snapshot(inbox_dir: &Path) -> serde_json::Value {

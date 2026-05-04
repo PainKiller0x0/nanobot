@@ -44,6 +44,12 @@ python3 /root/.nanobot/workspace/skills/knowledge-inbox/inbox.py list --limit 8
 python3 /root/.nanobot/workspace/skills/knowledge-inbox/inbox.py read "条目ID"
 ```
 
+删除某条收件箱条目：
+
+```bash
+python3 /root/.nanobot/workspace/skills/knowledge-inbox/inbox.py delete "条目ID"
+```
+
 生成待读决策简报：
 
 ```bash
@@ -55,4 +61,5 @@ python3 /root/.nanobot/workspace/skills/knowledge-inbox/inbox.py brief --limit 8
 - 用户只发普通网页 URL，且不是微信/鸭哥专用文章时，可以先 capture。
 - 用户问“值得看吗”“要不要读”“帮我判断”，使用 decide。
 - 用户问“收件箱”“待读列表”“今天先看什么”，使用 list 或 brief。
+- 用户明确要求删除某条收件箱内容时，使用 delete；只删除用户指定的唯一条目，不批量清空。
 - 微信文章和鸭哥 AI 正文仍优先走 RSS sidecar 专用 skill；本 skill 只负责通用链接收件箱。
