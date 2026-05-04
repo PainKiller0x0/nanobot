@@ -26,6 +26,11 @@ MD_DIR = DATA_DIR / "markdown"
 MAX_FETCH_BYTES = 2_000_000
 TIMEOUT_SECS = 15
 USER_AGENT = "NanobotKnowledgeInbox/1.0 (+local personal assistant)"
+WECHAT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0 Safari/537.36"
+)
 WECHAT_HOSTS = {"mp.weixin.qq.com"}
 WECHAT_ENV_MARKERS = ("环境异常", "当前环境异常", "完成验证后即可继续访问", "去验证")
 
@@ -100,24 +105,21 @@ def looks_like_wechat_env_block(title: str, markdown: str) -> bool:
     return "环境异常" in text and any(marker in text for marker in WECHAT_ENV_MARKERS)
 
 
-def wechat_placeholder_page(page: "FetchedPage") -> FetchedPage:
-    url = page.url
-    markdown = "\n".join([
-        "# 微信文章（待补正文）",
-        "",
-        f"- 原文链接: [Open Link]({url})",
-        "- 状态: 微信环境验证页，通用抓取无法读取正文。",
-        "",
-        "> 已保留原文链接，没有保存 `环境异常` 验证页内容。",
-    ])
-    return FetchedPage(
-        url=page.url,
-        final_url=page.url,
-        title="微信文章（待补正文）",
-        description="微信限制通用抓取，已保存原文链接；后续可通过 RSS sidecar 或浏览器补正文。",
-        markdown=markdown,
-        content_type=page.content_type,
-    )
+def request_headers_for_url(url: str) -> dict[str, str]:
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.5",
+    }
+    if is_wechat_article_url(url):
+        # WeChat blocks the custom bot UA with an environment check page. A normal
+        # browser UA returns the article HTML for public links, which we then parse
+        # locally into Markdown.
+        headers.update({
+            "User-Agent": WECHAT_USER_AGENT,
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "Referer": "https://mp.weixin.qq.com/",
+        })
+    return headers
 
 
 class MarkdownHTMLParser(HTMLParser):
@@ -240,7 +242,7 @@ class FetchedPage:
 
 def fetch_url(url: str) -> FetchedPage:
     url = valid_url(url)
-    req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.5"})
+    req = Request(url, headers=request_headers_for_url(url))
     try:
         with urlopen(req, timeout=TIMEOUT_SECS) as resp:
             content_type = resp.headers.get("Content-Type", "")
@@ -382,17 +384,12 @@ def capture(url: str, note: str = "", tags: list[str] | None = None, force: bool
     page = fetch_url(url)
     wechat_blocked = is_wechat_article_url(page.final_url or page.url) and looks_like_wechat_env_block(page.title, page.markdown)
     if wechat_blocked:
-        page = wechat_placeholder_page(page)
+        raise RuntimeError("微信文章解析失败：微信返回环境验证页，未保存空文章")
     items = load_items()
     existing = next((v for v in items.values() if v.get("url") == page.url or v.get("final_url") == page.final_url), None)
     item_id = existing.get("id") if existing and not force else item_id_for_url(page.final_url or page.url)
-    if wechat_blocked:
-        score, label, reasons = (50, "待补正文", ["微信限制通用抓取，已保留原文链接但未保存验证页"])
-        keywords = ["微信文章", "待补正文"]
-        tags = [*(tags or []), "wechat", "needs-fetch"]
-    else:
-        score, label, reasons = score_page(page.title, page.description, page.markdown)
-        keywords = extract_keywords(f"{page.title}\n{page.description}\n{page.markdown}")
+    score, label, reasons = score_page(page.title, page.description, page.markdown)
+    keywords = extract_keywords(f"{page.title}\n{page.description}\n{page.markdown}")
     item = {
         "id": item_id,
         "url": page.url,
@@ -411,7 +408,7 @@ def capture(url: str, note: str = "", tags: list[str] | None = None, force: bool
         "links": extract_links(page.markdown),
         "note": note,
         "tags": tags or [],
-        "source_status": "wechat_env_blocked" if wechat_blocked else "ok",
+        "source_status": "ok",
     }
     md_path = write_markdown(item, page.markdown)
     item["markdown_path"] = str(md_path)
